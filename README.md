@@ -59,11 +59,22 @@ cp .env.example .env
 source .env
 ```
 
+**Git hooks protect against accidental credential commits:**
+```bash
+./scripts/setup-hooks.sh  # Run once after cloning
+```
+
+The pre-commit hook will:
+- Block commits if `.env.example` contains real-looking credentials (AWS keys, etc.)
+- Prompt for confirmation if `.env.example` is modified
+- Block any `.env` files from being committed
+
 ## Quick Start
 
 ```bash
-# 1. Initialize submodule
+# 1. Initialize submodule and git hooks
 git submodule update --init
+./scripts/setup-hooks.sh
 
 # 2. Configure credentials
 cp .env.example .env
@@ -103,7 +114,10 @@ omerta-infra/
 │   └── environments/prod/           # Production configuration
 ├── scripts/
 │   ├── build.sh                     # Build omerta-rendezvous
-│   └── deploy.sh                    # Deploy to EC2
+│   ├── deploy.sh                    # Deploy to EC2
+│   └── setup-hooks.sh               # Configure git hooks
+├── .githooks/
+│   └── pre-commit                   # Blocks credential commits
 ├── docs/
 │   └── setup.md                     # Detailed setup guide
 ├── .env.example                     # Environment template

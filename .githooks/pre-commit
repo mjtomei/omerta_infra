@@ -1,0 +1,58 @@
+#!/bin/bash
+# Pre-commit hook to protect .env.example from accidental credential commits
+
+# Check if .env.example is staged for commit
+if git diff --cached --name-only | grep -q "^\.env\.example$"; then
+    echo "=========================================="
+    echo "WARNING: .env.example is staged for commit"
+    echo "=========================================="
+
+    # Check for patterns that look like real credentials
+    STAGED_CONTENT=$(git diff --cached --unified=0 .env.example | grep "^+" | grep -v "^+++" || true)
+
+    # Patterns that suggest real credentials (not placeholders)
+    if echo "$STAGED_CONTENT" | grep -qiE '(AKIA[A-Z0-9]{16}|[a-zA-Z0-9/+=]{40}|[0-9]{12}|sk-[a-zA-Z0-9]+)'; then
+        echo ""
+        echo "ERROR: .env.example appears to contain real credentials!"
+        echo ""
+        echo "Detected patterns that look like:"
+        echo "  - AWS Access Key IDs (AKIA...)"
+        echo "  - AWS Secret Keys (40+ char strings)"
+        echo "  - API keys (sk-...)"
+        echo ""
+        echo "COMMIT BLOCKED. Please:"
+        echo "  1. Remove credentials from .env.example"
+        echo "  2. Use placeholder values like 'your-access-key-id'"
+        echo "  3. Run: git reset HEAD .env.example"
+        echo ""
+        exit 1
+    fi
+
+    # Warn but allow if it's just placeholder changes
+    echo ""
+    echo "Please verify you're not committing real credentials."
+    echo ""
+    echo "Changed lines:"
+    echo "$STAGED_CONTENT" | head -20
+    echo ""
+    read -p "Continue with commit? [y/N] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Commit aborted. Run: git reset HEAD .env.example"
+        exit 1
+    fi
+fi
+
+# Also check for any .env files that shouldn't be committed
+if git diff --cached --name-only | grep -qE '^\.env$|^\.env\.[^e]|^\.env\.local|^\.env\.production'; then
+    echo ""
+    echo "ERROR: Attempting to commit .env file with potential secrets!"
+    echo ""
+    echo "These files should never be committed:"
+    git diff --cached --name-only | grep -E '^\.env$|^\.env\.[^e]|^\.env\.local|^\.env\.production'
+    echo ""
+    echo "COMMIT BLOCKED. Run: git reset HEAD <filename>"
+    exit 1
+fi
+
+exit 0
