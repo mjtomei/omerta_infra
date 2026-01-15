@@ -64,10 +64,10 @@ source .env
 ./scripts/setup-hooks.sh  # Run once after cloning
 ```
 
-The pre-commit hook will:
-- Block commits if `.env.example` contains real-looking credentials (AWS keys, etc.)
-- Prompt for confirmation if `.env.example` is modified
-- Block any `.env` files from being committed
+The pre-commit hook will **block commits** containing:
+- Any changes to `.env.example` (protected file)
+- Any `.env` files (`.env`, `.env.local`, `.env.production`, etc.)
+- Credential files (`*.pem`, `*.key`, `credentials*`, `secrets*`, etc.)
 
 ## Quick Start
 
