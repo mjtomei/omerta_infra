@@ -1,0 +1,26 @@
+# Build artifacts
+/build/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+
+# Secrets
+*.pem
+*.key
+credentials*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
