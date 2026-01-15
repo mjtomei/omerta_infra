@@ -13,10 +13,26 @@ terraform.tfvars
 # Secrets & Environment
 .env
 .env.*
+.env.local
+.env.production
 !.env.example
+
+# Credentials & Keys
 *.pem
 *.key
+*.p12
+*.pfx
+*.crt
+*.cer
 credentials*
+secrets*
+*_credentials.json
+*_secret*
+.aws/
+aws-credentials*
+service-account*.json
+token.json
+auth.json
 
 # OS
 .DS_Store
