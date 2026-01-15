@@ -19,7 +19,7 @@ variable "aws_region" {
 variable "domain_name" {
   description = "Domain name for Route53 hosted zone"
   type        = string
-  default     = "mtomei.com"
+  default     = "omerta.run"
 }
 
 # =============================================================================

@@ -8,7 +8,7 @@ This guide walks through setting up Omerta rendezvous servers on AWS EC2 with Ro
 2. **AWS CLI** installed and configured
 3. **Terraform** >= 1.0 installed
 4. **SSH Key Pair** created in AWS EC2
-5. **Domain** registered (mtomei.com at Squarespace)
+5. **Domain** registered (omerta.run at Squarespace)
 
 ## Step 1: Create AWS IAM User
 
@@ -97,7 +97,7 @@ route53_nameservers = [
 Configure these in Squarespace:
 
 1. Log in to [Squarespace Domains](https://account.squarespace.com/domains)
-2. Select **mtomei.com**
+2. Select **omerta.run**
 3. Click **DNS Settings**
 4. Click **Nameservers**
 5. Select **Use custom nameservers**

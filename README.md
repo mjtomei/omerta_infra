@@ -23,10 +23,10 @@ This repository contains:
                     ┌─────────────────────────────────┐
                     │        AWS Route53              │
                     │                                 │
-                    │  rendezvous1.mtomei.com ──┐     │
-                    │  rendezvous2.mtomei.com ──┼──►  │
-                    │  stun1.mtomei.com ────────┤     │
-                    │  stun2.mtomei.com ────────┘     │
+                    │  rendezvous1.omerta.run ──┐     │
+                    │  rendezvous2.omerta.run ──┼──►  │
+                    │  stun1.omerta.run ────────┤     │
+                    │  stun2.omerta.run ────────┘     │
                     └─────────────────────────────────┘
                            │                │
                            ▼                ▼
@@ -99,7 +99,7 @@ cd ../../..
 After `terraform apply`, you'll see Route53 nameservers in the output. Configure these in Squarespace:
 
 1. Log in to Squarespace Domains
-2. Select mtomei.com → DNS Settings → Nameservers
+2. Select omerta.run → DNS Settings → Nameservers
 3. Choose "Use custom nameservers"
 4. Enter the 4 Route53 nameservers from Terraform output
 5. Save and wait for propagation (up to 48 hours)
@@ -128,10 +128,10 @@ omerta-infra/
 
 | Subdomain | Points To | Purpose |
 |-----------|-----------|---------|
-| `rendezvous1.mtomei.com` | EC2 #1 | Primary rendezvous |
-| `rendezvous2.mtomei.com` | EC2 #2 | Secondary rendezvous |
-| `stun1.mtomei.com` | EC2 #1 | STUN endpoint alias |
-| `stun2.mtomei.com` | EC2 #2 | STUN endpoint alias |
+| `rendezvous1.omerta.run` | EC2 #1 | Primary rendezvous |
+| `rendezvous2.omerta.run` | EC2 #2 | Secondary rendezvous |
+| `stun1.omerta.run` | EC2 #1 | STUN endpoint alias |
+| `stun2.omerta.run` | EC2 #2 | STUN endpoint alias |
 
 ## Ports
 
