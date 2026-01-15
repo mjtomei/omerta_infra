@@ -17,7 +17,6 @@ output "rendezvous1_endpoints" {
   value = {
     signaling = module.rendezvous1.signaling_endpoint
     stun      = module.rendezvous1.stun_endpoint
-    relay     = module.rendezvous1.relay_endpoint
   }
 }
 
@@ -26,7 +25,6 @@ output "rendezvous2_endpoints" {
   value = {
     signaling = module.rendezvous2.signaling_endpoint
     stun      = module.rendezvous2.stun_endpoint
-    relay     = module.rendezvous2.relay_endpoint
   }
 }
 

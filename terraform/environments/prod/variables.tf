@@ -13,7 +13,7 @@
 variable "aws_region" {
   description = "AWS region (can also be set via AWS_REGION env var)"
   type        = string
-  default     = "us-east-1"
+  default     = "us-west-2"
 }
 
 variable "domain_name" {
@@ -29,7 +29,7 @@ variable "domain_name" {
 variable "instance_type" {
   description = "EC2 instance type for rendezvous servers"
   type        = string
-  default     = "t3.small"
+  default     = "t3.micro"
 }
 
 variable "key_name" {
@@ -42,4 +42,20 @@ variable "ssh_cidr_blocks" {
   description = "CIDR blocks allowed for SSH access (set via TF_VAR_ssh_cidr_blocks env var)"
   type        = list(string)
   default     = []  # Empty default - should be set to your IP
+}
+
+# =============================================================================
+# Cost Controls
+# =============================================================================
+
+variable "bandwidth_cap_gb" {
+  description = "Monthly bandwidth cap in GB per instance. Alarm triggers at 80% of this."
+  type        = number
+  default     = 10  # 10GB/month = ~$0.90 max bandwidth cost per server
+}
+
+variable "alert_email" {
+  description = "Email for bandwidth alerts (set via TF_VAR_alert_email env var)"
+  type        = string
+  default     = ""  # Optional - no alerts if empty
 }

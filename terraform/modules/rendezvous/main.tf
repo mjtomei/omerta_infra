@@ -43,14 +43,14 @@ resource "aws_security_group" "rendezvous" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Relay server (UDP)
-  ingress {
-    description = "Relay"
-    from_port   = 3479
-    to_port     = 3479
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # Relay server (UDP) - disabled by default, uncomment if using relay
+  # ingress {
+  #   description = "Relay"
+  #   from_port   = 3479
+  #   to_port     = 3479
+  #   protocol    = "udp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
 
   # Allow all outbound
   egress {

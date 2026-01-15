@@ -140,7 +140,8 @@ omerta-infra/
 | 22 | TCP | SSH (restricted to your IP) |
 | 8080 | TCP | WebSocket signaling |
 | 3478 | UDP | STUN server |
-| 3479 | UDP | Relay server |
+
+Note: Relay server (port 3479) is disabled by default to minimize bandwidth costs.
 
 ## Documentation
 
@@ -151,9 +152,19 @@ omerta-infra/
 
 | Resource | Monthly Cost |
 |----------|--------------|
-| 2x t3.small EC2 | ~$30 |
+| 2x t3.micro EC2 (us-west-2) | ~$15 |
 | Route53 hosted zone | ~$0.50 |
 | 2x Elastic IPs (in use) | $0 |
-| Data transfer | Variable |
+| 2x EBS 8GB gp3 | ~$1.28 |
+| Data transfer (STUN only) | ~$0.05 |
+| CloudWatch alarms | $0.20 |
 
-**Total**: ~$30-35/month
+**Total**: ~$17/month
+
+## Cost Controls
+
+- **Relay disabled**: Only signaling + STUN, no data relay
+- **Bandwidth monitoring**: CloudWatch alarms at 80% of 10GB/month cap
+- **Email alerts**: Optional notifications when bandwidth spikes
+
+Set `TF_VAR_alert_email` to receive bandwidth warnings.

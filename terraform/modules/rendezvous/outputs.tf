@@ -28,7 +28,8 @@ output "stun_endpoint" {
   value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:3478"
 }
 
-output "relay_endpoint" {
-  description = "Relay server endpoint"
-  value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:3479"
-}
+# Relay endpoint - disabled by default
+# output "relay_endpoint" {
+#   description = "Relay server endpoint"
+#   value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:3479"
+# }

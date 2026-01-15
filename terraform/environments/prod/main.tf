@@ -97,7 +97,7 @@ locals {
     Type=simple
     User=omerta
     Group=omerta
-    ExecStart=/opt/omerta/omerta-rendezvous --port 8080 --stun-port 3478 --relay-port 3479 --log-level info
+    ExecStart=/opt/omerta/omerta-rendezvous --port 8080 --stun-port 3478 --no-relay --log-level info
     Restart=always
     RestartSec=5
     StandardOutput=append:/var/log/omerta/rendezvous.log
@@ -124,7 +124,7 @@ module "rendezvous1" {
   ami_id        = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
   key_name      = var.key_name
-  volume_size   = 20
+  volume_size   = 8
   create_eip    = true
   user_data     = local.user_data
 
@@ -147,7 +147,7 @@ module "rendezvous2" {
   ami_id        = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
   key_name      = var.key_name
-  volume_size   = 20
+  volume_size   = 8
   create_eip    = true
   user_data     = local.user_data
 
@@ -210,4 +210,86 @@ resource "aws_route53_record" "stun2" {
   type    = "A"
   ttl     = 300
   records = [module.rendezvous2.public_ip]
+}
+
+# =============================================================================
+# CloudWatch Bandwidth Monitoring & Alerts
+# =============================================================================
+
+# SNS topic for alerts (only created if alert_email is provided)
+resource "aws_sns_topic" "bandwidth_alerts" {
+  count = var.alert_email != "" ? 1 : 0
+  name  = "omerta-bandwidth-alerts"
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_sns_topic_subscription" "bandwidth_alerts_email" {
+  count     = var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.bandwidth_alerts[0].arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+# Calculate threshold: 80% of monthly cap, converted to bytes per 5-minute period
+# Monthly cap (GB) * 0.8 * 1024^3 / (30 days * 24 hours * 12 periods/hour)
+locals {
+  # Bytes per 5-minute period at 80% of monthly cap
+  bandwidth_threshold_bytes = var.bandwidth_cap_gb * 0.8 * 1073741824 / (30 * 24 * 12)
+}
+
+# Bandwidth alarm for rendezvous1
+resource "aws_cloudwatch_metric_alarm" "rendezvous1_bandwidth" {
+  alarm_name          = "omerta-rendezvous1-bandwidth-warning"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "NetworkOut"
+  namespace           = "AWS/EC2"
+  period              = 300  # 5 minutes
+  statistic           = "Sum"
+  threshold           = local.bandwidth_threshold_bytes
+  alarm_description   = "Bandwidth usage exceeding 80% of ${var.bandwidth_cap_gb}GB monthly cap"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    InstanceId = module.rendezvous1.instance_id
+  }
+
+  # Only send to SNS if email is configured
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "rendezvous"
+  }
+}
+
+# Bandwidth alarm for rendezvous2
+resource "aws_cloudwatch_metric_alarm" "rendezvous2_bandwidth" {
+  alarm_name          = "omerta-rendezvous2-bandwidth-warning"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "NetworkOut"
+  namespace           = "AWS/EC2"
+  period              = 300  # 5 minutes
+  statistic           = "Sum"
+  threshold           = local.bandwidth_threshold_bytes
+  alarm_description   = "Bandwidth usage exceeding 80% of ${var.bandwidth_cap_gb}GB monthly cap"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    InstanceId = module.rendezvous2.instance_id
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "rendezvous"
+  }
 }
