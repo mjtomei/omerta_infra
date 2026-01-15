@@ -1,76 +1,145 @@
 # Omerta Infrastructure
 
-Infrastructure and deployment code for Omerta rendezvous servers on AWS EC2.
+Infrastructure and deployment code for Omerta rendezvous servers on AWS EC2 with Route53 DNS.
 
 ## Overview
 
 This repository contains:
-- Terraform configurations for provisioning EC2 instances
-- Deployment scripts for building and deploying the `omerta-rendezvous` server
-- DNS configuration for subdomains under `mtomei.com`
+- Terraform configurations for EC2 instances and Route53 DNS
+- Build and deployment scripts for `omerta-rendezvous`
+- Documentation for Squarespace to Route53 DNS delegation
 
 ## Architecture
 
-Rendezvous servers provide three services for the Omerta mesh network:
-- **Signaling Server** (WebSocket, port 8080) - Peer coordination and NAT traversal signaling
-- **STUN Server** (UDP, port 3478) - Public endpoint discovery for NAT detection
-- **Relay Server** (UDP, port 3479) - Fallback relay for symmetric NAT scenarios
+```
+                    ┌─────────────────────────────────┐
+                    │         Squarespace             │
+                    │   (Domain Registration Only)    │
+                    │                                 │
+                    │   Nameservers → Route53         │
+                    └─────────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌─────────────────────────────────┐
+                    │        AWS Route53              │
+                    │                                 │
+                    │  rendezvous1.mtomei.com ──┐     │
+                    │  rendezvous2.mtomei.com ──┼──►  │
+                    │  stun1.mtomei.com ────────┤     │
+                    │  stun2.mtomei.com ────────┘     │
+                    └─────────────────────────────────┘
+                           │                │
+                           ▼                ▼
+              ┌────────────────┐  ┌────────────────┐
+              │  EC2 Instance  │  │  EC2 Instance  │
+              │  rendezvous1   │  │  rendezvous2   │
+              │                │  │                │
+              │ WebSocket:8080 │  │ WebSocket:8080 │
+              │ STUN:3478/udp  │  │ STUN:3478/udp  │
+              │ Relay:3479/udp │  │ Relay:3479/udp │
+              └────────────────┘  └────────────────┘
+```
 
-## Planned Subdomains
+## Credentials & Security
 
-| Subdomain | Purpose |
-|-----------|---------|
-| `rendezvous1.mtomei.com` | Primary rendezvous server |
-| `rendezvous2.mtomei.com` | Secondary rendezvous server |
-| `stun1.mtomei.com` | STUN-only endpoint (alias) |
+**All credentials are sourced from environment variables. Nothing is hardcoded.**
+
+| Variable | Purpose |
+|----------|---------|
+| `AWS_ACCESS_KEY_ID` | AWS authentication |
+| `AWS_SECRET_ACCESS_KEY` | AWS authentication |
+| `AWS_REGION` | AWS region (default: us-east-1) |
+| `TF_VAR_key_name` | EC2 SSH key pair name |
+| `TF_VAR_ssh_cidr_blocks` | IP allowlist for SSH |
+
+```bash
+# Setup
+cp .env.example .env
+# Edit .env with your values
+source .env
+```
+
+## Quick Start
+
+```bash
+# 1. Initialize submodule
+git submodule update --init
+
+# 2. Configure credentials
+cp .env.example .env
+nano .env  # Add your AWS credentials
+source .env
+
+# 3. Deploy infrastructure
+cd terraform/environments/prod
+terraform init
+terraform apply
+
+# 4. Configure Squarespace nameservers (see output)
+
+# 5. Build and deploy binary
+cd ../../..
+./scripts/build.sh
+./scripts/deploy.sh prod all
+```
+
+## DNS Configuration
+
+After `terraform apply`, you'll see Route53 nameservers in the output. Configure these in Squarespace:
+
+1. Log in to Squarespace Domains
+2. Select mtomei.com → DNS Settings → Nameservers
+3. Choose "Use custom nameservers"
+4. Enter the 4 Route53 nameservers from Terraform output
+5. Save and wait for propagation (up to 48 hours)
 
 ## Directory Structure
 
 ```
 omerta-infra/
-├── omerta/                    # Omerta source (submodule)
+├── omerta/                          # Source code (submodule)
 ├── terraform/
-│   ├── modules/
-│   │   └── rendezvous/        # Reusable EC2 + security group module
-│   └── environments/
-│       ├── prod/              # Production configuration
-│       └── staging/           # Staging configuration
+│   ├── modules/rendezvous/          # Reusable EC2 + security group
+│   └── environments/prod/           # Production configuration
 ├── scripts/
-│   ├── build.sh               # Build omerta-rendezvous binary
-│   └── deploy.sh              # Deploy to EC2 instances
-└── docs/
-    └── setup.md               # Setup and deployment guide
+│   ├── build.sh                     # Build omerta-rendezvous
+│   └── deploy.sh                    # Deploy to EC2
+├── docs/
+│   └── setup.md                     # Detailed setup guide
+├── .env.example                     # Environment template
+└── README.md
 ```
 
-## Prerequisites
+## DNS Records Created
 
-- AWS CLI configured with appropriate credentials
-- Terraform >= 1.0
-- Swift toolchain (for building omerta-rendezvous)
-- Domain `mtomei.com` with Route53 or external DNS
+| Subdomain | Points To | Purpose |
+|-----------|-----------|---------|
+| `rendezvous1.mtomei.com` | EC2 #1 | Primary rendezvous |
+| `rendezvous2.mtomei.com` | EC2 #2 | Secondary rendezvous |
+| `stun1.mtomei.com` | EC2 #1 | STUN endpoint alias |
+| `stun2.mtomei.com` | EC2 #2 | STUN endpoint alias |
 
-## Quick Start
+## Ports
 
-```bash
-# Initialize submodule
-git submodule update --init
+| Port | Protocol | Service |
+|------|----------|---------|
+| 22 | TCP | SSH (restricted to your IP) |
+| 8080 | TCP | WebSocket signaling |
+| 3478 | UDP | STUN server |
+| 3479 | UDP | Relay server |
 
-# Build the rendezvous server
-./scripts/build.sh
+## Documentation
 
-# Deploy infrastructure (staging)
-cd terraform/environments/staging
-terraform init
-terraform apply
+- [Detailed Setup Guide](docs/setup.md) - Step-by-step instructions
+- [Omerta Mesh Docs](omerta/docs/) - Protocol documentation
 
-# Deploy binary to servers
-./scripts/deploy.sh staging
-```
+## Cost Estimate
 
-## Ports Required
+| Resource | Monthly Cost |
+|----------|--------------|
+| 2x t3.small EC2 | ~$30 |
+| Route53 hosted zone | ~$0.50 |
+| 2x Elastic IPs (in use) | $0 |
+| Data transfer | Variable |
 
-Security groups must allow:
-- TCP 22 (SSH)
-- TCP 8080 (WebSocket signaling)
-- UDP 3478 (STUN)
-- UDP 3479 (Relay)
+**Total**: ~$30-35/month

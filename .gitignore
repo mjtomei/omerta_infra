@@ -10,7 +10,10 @@ terraform.tfvars
 *.tfvars
 !*.tfvars.example
 
-# Secrets
+# Secrets & Environment
+.env
+.env.*
+!.env.example
 *.pem
 *.key
 credentials*

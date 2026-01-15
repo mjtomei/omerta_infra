@@ -1,5 +1,12 @@
 # Production Rendezvous Servers
 # Deploys multiple rendezvous servers for mtomei.com subdomains
+#
+# CREDENTIALS: AWS credentials are sourced from environment variables:
+#   - AWS_ACCESS_KEY_ID
+#   - AWS_SECRET_ACCESS_KEY
+#   - AWS_REGION (optional, defaults to us-east-1)
+#
+# See .env.example for required environment variables.
 
 terraform {
   required_version = ">= 1.0"
@@ -19,8 +26,18 @@ terraform {
   # }
 }
 
+# AWS provider uses credentials from environment variables:
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
 provider "aws" {
   region = var.aws_region
+
+  # Credentials are read from environment variables automatically.
+  # DO NOT hardcode credentials here.
+  #
+  # The provider checks these sources in order:
+  # 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+  # 2. Shared credentials file (~/.aws/credentials)
+  # 3. IAM role (if running on EC2)
 }
 
 # Data sources for default VPC (customize for production)
@@ -143,31 +160,54 @@ module "rendezvous2" {
   }
 }
 
-# Route53 DNS records (optional - uncomment if using Route53)
-# data "aws_route53_zone" "mtomei" {
-#   name = "mtomei.com."
-# }
-#
-# resource "aws_route53_record" "rendezvous1" {
-#   zone_id = data.aws_route53_zone.mtomei.zone_id
-#   name    = "rendezvous1.mtomei.com"
-#   type    = "A"
-#   ttl     = 300
-#   records = [module.rendezvous1.public_ip]
-# }
-#
-# resource "aws_route53_record" "rendezvous2" {
-#   zone_id = data.aws_route53_zone.mtomei.zone_id
-#   name    = "rendezvous2.mtomei.com"
-#   type    = "A"
-#   ttl     = 300
-#   records = [module.rendezvous2.public_ip]
-# }
-#
-# resource "aws_route53_record" "stun1" {
-#   zone_id = data.aws_route53_zone.mtomei.zone_id
-#   name    = "stun1.mtomei.com"
-#   type    = "A"
-#   ttl     = 300
-#   records = [module.rendezvous1.public_ip]
-# }
+# =============================================================================
+# Route53 DNS Configuration
+# =============================================================================
+
+# Create hosted zone for mtomei.com
+# After creation, update Squarespace nameservers to point to Route53
+resource "aws_route53_zone" "mtomei" {
+  name    = var.domain_name
+  comment = "Managed by Terraform - Omerta infrastructure"
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
+  }
+}
+
+# rendezvous1.mtomei.com -> Primary rendezvous server
+resource "aws_route53_record" "rendezvous1" {
+  zone_id = aws_route53_zone.mtomei.zone_id
+  name    = "rendezvous1.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.rendezvous1.public_ip]
+}
+
+# rendezvous2.mtomei.com -> Secondary rendezvous server
+resource "aws_route53_record" "rendezvous2" {
+  zone_id = aws_route53_zone.mtomei.zone_id
+  name    = "rendezvous2.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.rendezvous2.public_ip]
+}
+
+# stun1.mtomei.com -> Alias to rendezvous1 (for STUN-specific endpoint)
+resource "aws_route53_record" "stun1" {
+  zone_id = aws_route53_zone.mtomei.zone_id
+  name    = "stun1.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.rendezvous1.public_ip]
+}
+
+# stun2.mtomei.com -> Alias to rendezvous2 (for STUN-specific endpoint)
+resource "aws_route53_record" "stun2" {
+  zone_id = aws_route53_zone.mtomei.zone_id
+  name    = "stun2.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.rendezvous2.public_ip]
+}
