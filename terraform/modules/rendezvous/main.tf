@@ -1,5 +1,5 @@
-# Rendezvous Server Module
-# Creates an EC2 instance configured to run omerta-rendezvous
+# Omerta Server Module
+# Creates an EC2 instance running omerta-stun and omerta-mesh
 
 terraform {
   required_providers {
@@ -10,10 +10,10 @@ terraform {
   }
 }
 
-# Security group for rendezvous server
+# Security group for omerta server
 resource "aws_security_group" "rendezvous" {
   name        = "${var.name}-sg"
-  description = "Security group for Omerta rendezvous server"
+  description = "Security group for Omerta STUN and Mesh servers"
   vpc_id      = var.vpc_id
 
   # SSH access
@@ -25,15 +25,6 @@ resource "aws_security_group" "rendezvous" {
     cidr_blocks = var.ssh_cidr_blocks
   }
 
-  # WebSocket signaling server
-  ingress {
-    description = "WebSocket Signaling"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   # STUN server (UDP)
   ingress {
     description = "STUN"
@@ -43,14 +34,14 @@ resource "aws_security_group" "rendezvous" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Relay server (UDP) - disabled by default, uncomment if using relay
-  # ingress {
-  #   description = "Relay"
-  #   from_port   = 3479
-  #   to_port     = 3479
-  #   protocol    = "udp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
+  # Mesh bootstrap/relay (UDP)
+  ingress {
+    description = "Mesh Bootstrap"
+    from_port   = 5000
+    to_port     = 5000
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   # Allow all outbound
   egress {

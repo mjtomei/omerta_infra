@@ -59,3 +59,25 @@ variable "alert_email" {
   type        = string
   default     = ""  # Optional - no alerts if empty
 }
+
+# =============================================================================
+# Backup Configuration
+# =============================================================================
+
+variable "enable_ebs_snapshots" {
+  description = "Enable automated EBS snapshots via Data Lifecycle Manager"
+  type        = bool
+  default     = true
+}
+
+variable "snapshot_retention_days" {
+  description = "Number of days to retain EBS snapshots"
+  type        = number
+  default     = 7
+}
+
+variable "snapshot_schedule_cron" {
+  description = "Cron expression for snapshot schedule (UTC). Default: daily at 3 AM UTC"
+  type        = string
+  default     = "cron(0 3 * * ? *)"
+}

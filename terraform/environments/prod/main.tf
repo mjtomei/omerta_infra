@@ -68,7 +68,7 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
-# User data script to install dependencies and set up systemd service
+# User data script to install dependencies and set up systemd services
 locals {
   user_data = <<-EOF
     #!/bin/bash
@@ -77,7 +77,7 @@ locals {
     # Update system
     dnf update -y
 
-    # Install Swift dependencies
+    # Install dependencies
     dnf install -y git gcc-c++ libcurl-devel libuuid-devel libxml2-devel ncurses-devel
 
     # Create omerta user
@@ -87,30 +87,58 @@ locals {
     mkdir -p /opt/omerta /var/log/omerta
     chown omerta:omerta /opt/omerta /var/log/omerta
 
-    # Create systemd service (binary will be deployed separately)
-    cat > /etc/systemd/system/omerta-rendezvous.service <<'SERVICE'
+    # Generate stable peer ID based on instance identity
+    INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id || echo "unknown")
+    PEER_ID="bootstrap-$${INSTANCE_ID}"
+
+    # Create omerta-stun systemd service
+    cat > /etc/systemd/system/omerta-stun.service <<'SERVICE'
     [Unit]
-    Description=Omerta Rendezvous Server
+    Description=Omerta STUN Server
     After=network.target
 
     [Service]
     Type=simple
     User=omerta
     Group=omerta
-    ExecStart=/opt/omerta/omerta-rendezvous --port 8080 --stun-port 3478 --no-relay --log-level info
+    ExecStart=/opt/omerta/omerta-stun --port 3478 --log-level info
     Restart=always
     RestartSec=5
-    StandardOutput=append:/var/log/omerta/rendezvous.log
-    StandardError=append:/var/log/omerta/rendezvous.log
+    StandardOutput=append:/var/log/omerta/stun.log
+    StandardError=append:/var/log/omerta/stun.log
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+
+    # Create omerta-mesh systemd service (bootstrap mode, no relay)
+    # Note: --relay flag is intentionally omitted to minimize bandwidth costs.
+    # The node still handles peer discovery and hole punch coordination.
+    # Add --relay if you need to relay data for peers who can't establish direct connections.
+    cat > /etc/systemd/system/omerta-mesh.service <<SERVICE
+    [Unit]
+    Description=Omerta Mesh Bootstrap Node
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=omerta
+    Group=omerta
+    ExecStart=/opt/omerta/omerta-mesh --port 5000 --peer-id $PEER_ID --log-level info
+    Restart=always
+    RestartSec=5
+    StandardOutput=append:/var/log/omerta/mesh.log
+    StandardError=append:/var/log/omerta/mesh.log
 
     [Install]
     WantedBy=multi-user.target
     SERVICE
 
     systemctl daemon-reload
-    systemctl enable omerta-rendezvous
+    systemctl enable omerta-stun
+    systemctl enable omerta-mesh
 
-    echo "Setup complete. Deploy binary to /opt/omerta/omerta-rendezvous and start service."
+    echo "Setup complete. Deploy binaries to /opt/omerta/ and start services."
   EOF
 }
 
@@ -134,6 +162,7 @@ module "rendezvous1" {
     Environment = "prod"
     Service     = "rendezvous"
     Domain      = "rendezvous1.omerta.run"
+    Backup      = "true"
   }
 }
 
@@ -157,6 +186,7 @@ module "rendezvous2" {
     Environment = "prod"
     Service     = "rendezvous"
     Domain      = "rendezvous2.omerta.run"
+    Backup      = "true"
   }
 }
 
@@ -291,5 +321,84 @@ resource "aws_cloudwatch_metric_alarm" "rendezvous2_bandwidth" {
   tags = {
     Environment = "prod"
     Service     = "rendezvous"
+  }
+}
+
+# =============================================================================
+# EBS Snapshot Automation (Data Lifecycle Manager)
+# =============================================================================
+# Automated daily snapshots of bootstrap node EBS volumes for disaster recovery.
+# Identity attestation data and configuration are preserved in these snapshots.
+
+# IAM role for DLM
+resource "aws_iam_role" "dlm_lifecycle_role" {
+  count = var.enable_ebs_snapshots ? 1 : 0
+  name  = "omerta-dlm-lifecycle-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "dlm.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "dlm_lifecycle" {
+  count      = var.enable_ebs_snapshots ? 1 : 0
+  role       = aws_iam_role.dlm_lifecycle_role[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+}
+
+# DLM lifecycle policy for EBS snapshots
+resource "aws_dlm_lifecycle_policy" "ebs_snapshots" {
+  count       = var.enable_ebs_snapshots ? 1 : 0
+  description = "Automated EBS snapshots for Omerta bootstrap nodes"
+  state       = "ENABLED"
+
+  execution_role_arn = aws_iam_role.dlm_lifecycle_role[0].arn
+
+  policy_details {
+    resource_types = ["INSTANCE"]
+
+    # Target instances with the Backup=true tag
+    target_tags = {
+      Backup = "true"
+    }
+
+    schedule {
+      name = "Daily snapshots"
+
+      create_rule {
+        cron_expression = var.snapshot_schedule_cron
+      }
+
+      retain_rule {
+        count = var.snapshot_retention_days
+      }
+
+      tags_to_add = {
+        SnapshotCreator = "DLM"
+        Environment     = "prod"
+        Service         = "rendezvous"
+      }
+
+      copy_tags = true
+    }
+  }
+
+  tags = {
+    Environment = "prod"
+    ManagedBy   = "terraform"
   }
 }

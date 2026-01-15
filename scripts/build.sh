@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the omerta-rendezvous binary for Linux deployment
+# Build omerta-stun and omerta-mesh binaries for deployment
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,7 +7,7 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 OMERTA_DIR="$ROOT_DIR/omerta"
 BUILD_DIR="$ROOT_DIR/build"
 
-echo "=== Building omerta-rendezvous ==="
+echo "=== Building Omerta Binaries ==="
 
 # Check if omerta submodule is initialized
 if [ ! -f "$OMERTA_DIR/Package.swift" ]; then
@@ -20,25 +20,39 @@ mkdir -p "$BUILD_DIR"
 
 cd "$OMERTA_DIR"
 
-# Build for release
-echo "Building release binary..."
-swift build -c release --product omerta-rendezvous
+# Build both products
+echo "Building omerta-stun..."
+swift build -c release --product OmertaSTUNCLI
 
-# Copy binary to build directory
-BINARY_PATH=$(swift build -c release --product omerta-rendezvous --show-bin-path)/omerta-rendezvous
+echo "Building omerta-mesh..."
+swift build -c release --product OmertaMeshCLI
 
-if [ -f "$BINARY_PATH" ]; then
-    cp "$BINARY_PATH" "$BUILD_DIR/"
-    echo "Binary copied to: $BUILD_DIR/omerta-rendezvous"
+# Get bin path
+BIN_PATH=$(swift build -c release --product OmertaSTUNCLI --show-bin-path)
 
-    # Show binary info
-    file "$BUILD_DIR/omerta-rendezvous"
-    ls -lh "$BUILD_DIR/omerta-rendezvous"
+# Copy binaries to build directory
+echo "Copying binaries..."
+
+if [ -f "$BIN_PATH/OmertaSTUNCLI" ]; then
+    cp "$BIN_PATH/OmertaSTUNCLI" "$BUILD_DIR/omerta-stun"
+    echo "  omerta-stun -> $BUILD_DIR/omerta-stun"
 else
-    echo "Error: Binary not found at $BINARY_PATH"
+    echo "Error: OmertaSTUNCLI binary not found"
+    exit 1
+fi
+
+if [ -f "$BIN_PATH/OmertaMeshCLI" ]; then
+    cp "$BIN_PATH/OmertaMeshCLI" "$BUILD_DIR/omerta-mesh"
+    echo "  omerta-mesh -> $BUILD_DIR/omerta-mesh"
+else
+    echo "Error: OmertaMeshCLI binary not found"
     exit 1
 fi
 
 echo ""
-echo "=== Build complete ==="
-echo "Binary: $BUILD_DIR/omerta-rendezvous"
+echo "=== Build Complete ==="
+echo ""
+echo "Binaries:"
+ls -lh "$BUILD_DIR/omerta-stun" "$BUILD_DIR/omerta-mesh"
+echo ""
+echo "To deploy: ./scripts/deploy.sh prod all"

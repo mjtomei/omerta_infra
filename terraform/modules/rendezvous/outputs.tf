@@ -18,18 +18,12 @@ output "security_group_id" {
   value       = aws_security_group.rendezvous.id
 }
 
-output "signaling_endpoint" {
-  description = "WebSocket signaling endpoint"
-  value       = "ws://${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:8080"
-}
-
 output "stun_endpoint" {
   description = "STUN server endpoint"
   value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:3478"
 }
 
-# Relay endpoint - disabled by default
-# output "relay_endpoint" {
-#   description = "Relay server endpoint"
-#   value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:3479"
-# }
+output "mesh_endpoint" {
+  description = "Mesh bootstrap endpoint"
+  value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:5000"
+}

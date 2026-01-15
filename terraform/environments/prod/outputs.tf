@@ -15,16 +15,16 @@ output "rendezvous2_public_ip" {
 output "rendezvous1_endpoints" {
   description = "All endpoints for rendezvous1"
   value = {
-    signaling = module.rendezvous1.signaling_endpoint
-    stun      = module.rendezvous1.stun_endpoint
+    stun = module.rendezvous1.stun_endpoint
+    mesh = module.rendezvous1.mesh_endpoint
   }
 }
 
 output "rendezvous2_endpoints" {
   description = "All endpoints for rendezvous2"
   value = {
-    signaling = module.rendezvous2.signaling_endpoint
-    stun      = module.rendezvous2.stun_endpoint
+    stun = module.rendezvous2.stun_endpoint
+    mesh = module.rendezvous2.mesh_endpoint
   }
 }
 

@@ -6,7 +6,7 @@ Infrastructure and deployment code for Omerta rendezvous servers on AWS EC2 with
 
 This repository contains:
 - Terraform configurations for EC2 instances and Route53 DNS
-- Build and deployment scripts for `omerta-rendezvous`
+- Build and deployment scripts for `omerta-stun` and `omerta-mesh`
 - Documentation for Squarespace to Route53 DNS delegation
 
 ## Architecture
@@ -34,9 +34,8 @@ This repository contains:
               │  EC2 Instance  │  │  EC2 Instance  │
               │  rendezvous1   │  │  rendezvous2   │
               │                │  │                │
-              │ WebSocket:8080 │  │ WebSocket:8080 │
               │ STUN:3478/udp  │  │ STUN:3478/udp  │
-              │ Relay:3479/udp │  │ Relay:3479/udp │
+              │ Mesh:5000/udp  │  │ Mesh:5000/udp  │
               └────────────────┘  └────────────────┘
 ```
 
@@ -88,7 +87,7 @@ terraform apply
 
 # 4. Configure Squarespace nameservers (see output)
 
-# 5. Build and deploy binary
+# 5. Build and deploy binaries
 cd ../../..
 ./scripts/build.sh
 ./scripts/deploy.sh prod all
@@ -113,7 +112,7 @@ omerta-infra/
 │   ├── modules/rendezvous/          # Reusable EC2 + security group
 │   └── environments/prod/           # Production configuration
 ├── scripts/
-│   ├── build.sh                     # Build omerta-rendezvous
+│   ├── build.sh                     # Build omerta-stun and omerta-mesh
 │   ├── deploy.sh                    # Deploy to EC2
 │   └── setup-hooks.sh               # Configure git hooks
 ├── .githooks/
@@ -138,10 +137,8 @@ omerta-infra/
 | Port | Protocol | Service |
 |------|----------|---------|
 | 22 | TCP | SSH (restricted to your IP) |
-| 8080 | TCP | WebSocket signaling |
-| 3478 | UDP | STUN server |
-
-Note: Relay server (port 3479) is disabled by default to minimize bandwidth costs.
+| 3478 | UDP | STUN server (omerta-stun) |
+| 5000 | UDP | Mesh bootstrap (omerta-mesh) |
 
 ## Documentation
 
@@ -158,13 +155,31 @@ Note: Relay server (port 3479) is disabled by default to minimize bandwidth cost
 | 2x EBS 8GB gp3 | ~$1.28 |
 | Data transfer (STUN only) | ~$0.05 |
 | CloudWatch alarms | $0.20 |
+| EBS snapshots (7 days retention) | ~$0.50 |
 
-**Total**: ~$17/month
+**Total**: ~$18/month
 
 ## Cost Controls
 
-- **Relay disabled**: Only signaling + STUN, no data relay
+- **Relay disabled**: Mesh runs without `--relay` to minimize bandwidth. Add `--relay` flag in Terraform user_data if peers need data relay.
 - **Bandwidth monitoring**: CloudWatch alarms at 80% of 10GB/month cap
 - **Email alerts**: Optional notifications when bandwidth spikes
 
 Set `TF_VAR_alert_email` to receive bandwidth warnings.
+
+## Backups
+
+EBS snapshots are automated via AWS Data Lifecycle Manager (DLM):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enable_ebs_snapshots` | `true` | Enable/disable automated snapshots |
+| `snapshot_retention_days` | `7` | Days to retain snapshots |
+| `snapshot_schedule_cron` | `cron(0 3 * * ? *)` | Daily at 3 AM UTC |
+
+Snapshots capture all EBS volumes on instances tagged with `Backup=true`. This preserves identity attestation data and configuration for disaster recovery.
+
+**Future backup features (planned):**
+- Infrastructure redundancy (multi-region, failover)
+- Attestation data export to S3
+- Key material backup system

@@ -1,11 +1,10 @@
 #!/bin/bash
-# Deploy omerta-rendezvous binary to EC2 instances
+# Deploy omerta-stun and omerta-mesh binaries to EC2 instances
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$ROOT_DIR/build"
-BINARY="$BUILD_DIR/omerta-rendezvous"
 
 usage() {
     echo "Usage: $0 <environment> [server]"
@@ -28,9 +27,9 @@ fi
 ENVIRONMENT="$1"
 SERVER="${2:-all}"
 
-# Check binary exists
-if [ ! -f "$BINARY" ]; then
-    echo "Error: Binary not found at $BINARY"
+# Check binaries exist
+if [ ! -f "$BUILD_DIR/omerta-stun" ] || [ ! -f "$BUILD_DIR/omerta-mesh" ]; then
+    echo "Error: Binaries not found in $BUILD_DIR"
     echo "Run ./scripts/build.sh first"
     exit 1
 fi
@@ -61,19 +60,38 @@ deploy_to_server() {
     echo ""
     echo "=== Deploying to $name ($ip) ==="
 
-    # Upload binary
-    echo "Uploading binary..."
-    scp -o StrictHostKeyChecking=no "$BINARY" "ec2-user@$ip:/tmp/omerta-rendezvous"
+    # Upload binaries
+    echo "Uploading binaries..."
+    scp -o StrictHostKeyChecking=no \
+        "$BUILD_DIR/omerta-stun" \
+        "$BUILD_DIR/omerta-mesh" \
+        "ec2-user@$ip:/tmp/"
 
-    # Install and restart service
-    echo "Installing and restarting service..."
+    # Install and restart services
+    echo "Installing binaries and restarting services..."
     ssh -o StrictHostKeyChecking=no "ec2-user@$ip" << 'REMOTE'
-        sudo mv /tmp/omerta-rendezvous /opt/omerta/omerta-rendezvous
-        sudo chmod +x /opt/omerta/omerta-rendezvous
-        sudo chown omerta:omerta /opt/omerta/omerta-rendezvous
-        sudo systemctl restart omerta-rendezvous
+        # Install omerta-stun
+        sudo mv /tmp/omerta-stun /opt/omerta/omerta-stun
+        sudo chmod +x /opt/omerta/omerta-stun
+        sudo chown omerta:omerta /opt/omerta/omerta-stun
+
+        # Install omerta-mesh
+        sudo mv /tmp/omerta-mesh /opt/omerta/omerta-mesh
+        sudo chmod +x /opt/omerta/omerta-mesh
+        sudo chown omerta:omerta /opt/omerta/omerta-mesh
+
+        # Restart services
+        sudo systemctl restart omerta-stun
+        sudo systemctl restart omerta-mesh
+
         sleep 2
-        sudo systemctl status omerta-rendezvous --no-pager
+
+        echo ""
+        echo "Service status:"
+        echo "---------------"
+        sudo systemctl status omerta-stun --no-pager -l | head -10
+        echo ""
+        sudo systemctl status omerta-mesh --no-pager -l | head -10
 REMOTE
 
     echo "Deployed to $name successfully!"
