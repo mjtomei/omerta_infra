@@ -101,6 +101,19 @@ locals {
     mkdir -p /opt/omerta /var/log/omerta /home/omerta/.omerta
     chown -R omerta:omerta /opt/omerta /var/log/omerta /home/omerta/.omerta
 
+    # Configure log rotation to prevent disk from filling up
+    cat > /etc/logrotate.d/omerta <<'LOGROTATE'
+/var/log/omerta/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+LOGROTATE
+
     # Write the network join link for first-boot initialization
     # The omerta CLI will use this to join the network
     cat > /home/omerta/.omerta/network-link.txt <<'LINK'
