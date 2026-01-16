@@ -23,7 +23,7 @@ output "stun_endpoint" {
   value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:3478"
 }
 
-output "mesh_endpoint" {
-  description = "Mesh bootstrap endpoint"
-  value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:5000"
+output "omertad_endpoint" {
+  description = "Omertad mesh endpoint"
+  value       = "${var.create_eip ? aws_eip.rendezvous[0].public_ip : aws_instance.rendezvous.public_ip}:9999"
 }

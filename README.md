@@ -6,7 +6,8 @@ Infrastructure and deployment code for Omerta rendezvous servers on AWS EC2 with
 
 This repository contains:
 - Terraform configurations for EC2 instances and Route53 DNS
-- Build and deployment scripts for `omerta-stun` and `omerta-mesh`
+- Build and deployment scripts for `omerta-stun` and `omertad`
+- Network key generation and seeding for mesh network
 - Documentation for Squarespace to Route53 DNS delegation
 
 ## Architecture
@@ -35,7 +36,7 @@ This repository contains:
               │  rendezvous1   │  │  rendezvous2   │
               │                │  │                │
               │ STUN:3478/udp  │  │ STUN:3478/udp  │
-              │ Mesh:5000/udp  │  │ Mesh:5000/udp  │
+              │ Mesh:9999/udp  │  │ Mesh:9999/udp  │
               └────────────────┘  └────────────────┘
 ```
 
@@ -80,18 +81,43 @@ cp .env.example .env
 nano .env  # Add your AWS credentials
 source .env
 
-# 3. Deploy infrastructure
+# 3. Create the omerta network locally
+omerta network create --name "omerta-prod" \
+  --bootstrap "rendezvous1.omerta.run:9999" \
+  --bootstrap "rendezvous2.omerta.run:9999"
+
+# Copy the omerta://join/... link and add to .env:
+# TF_VAR_omerta_network_link="omerta://join/..."
+source .env
+
+# 4. Deploy infrastructure
 cd terraform/environments/prod
 terraform init
 terraform apply
 
-# 4. Configure Squarespace nameservers (see output)
+# 5. Configure Squarespace nameservers (see output)
 
-# 5. Build and deploy binaries
+# 6. Build and deploy binaries
 cd ../../..
 ./scripts/build.sh
 ./scripts/deploy.sh prod all
+
+# 7. Join network on first boot (SSH to each server)
+ssh ec2-user@rendezvous1.omerta.run
+sudo -u omerta /opt/omerta/first-boot.sh
+sudo systemctl start omertad
 ```
+
+## Network Seeding
+
+The network is created locally using `omerta network create`, then passed to Terraform:
+
+1. Create the network locally (generates encryption key + bootstrap peers)
+2. Set `TF_VAR_omerta_network_link` with the `omerta://join/...` link
+3. Terraform distributes the link to EC2 instances
+4. Run `first-boot.sh` on each server to join the network
+
+**Important:** Keep the network link secure - it contains the encryption key.
 
 ## DNS Configuration
 
@@ -112,7 +138,7 @@ omerta-infra/
 │   ├── modules/rendezvous/          # Reusable EC2 + security group
 │   └── environments/prod/           # Production configuration
 ├── scripts/
-│   ├── build.sh                     # Build omerta-stun and omerta-mesh
+│   ├── build.sh                     # Build omerta-stun, omertad, omerta
 │   ├── deploy.sh                    # Deploy to EC2
 │   └── setup-hooks.sh               # Configure git hooks
 ├── .githooks/
@@ -138,7 +164,30 @@ omerta-infra/
 |------|----------|---------|
 | 22 | TCP | SSH (restricted to your IP) |
 | 3478 | UDP | STUN server (omerta-stun) |
-| 5000 | UDP | Mesh bootstrap (omerta-mesh) |
+| 9999 | UDP | Mesh network (omertad) |
+
+## Services
+
+| Service | Binary | Config | Description |
+|---------|--------|--------|-------------|
+| `omerta-stun` | `/opt/omerta/omerta-stun` | CLI flags | STUN server for NAT detection |
+| `omertad` | `/opt/omerta/omertad` | `/home/omerta/.omerta/omertad.conf` | Mesh daemon for peer discovery |
+
+**Managing omertad:**
+```bash
+# View status
+sudo systemctl status omertad
+
+# Restart with new config
+sudo systemctl reload omertad
+
+# View logs
+sudo tail -f /var/log/omerta/omertad.log
+
+# Use CLI
+sudo -u omerta /opt/omerta/omerta network list
+sudo -u omerta /opt/omerta/omerta mesh peers
+```
 
 ## Documentation
 
@@ -161,7 +210,7 @@ omerta-infra/
 
 ## Cost Controls
 
-- **Relay disabled**: Mesh runs without `--relay` to minimize bandwidth. Add `--relay` flag in Terraform user_data if peers need data relay.
+- **Relay disabled**: omertad runs with `can-relay=false` to minimize bandwidth. Edit `/home/omerta/.omerta/omertad.conf` to enable if peers need data relay.
 - **Bandwidth monitoring**: CloudWatch alarms at 80% of 10GB/month cap
 - **Email alerts**: Optional notifications when bandwidth spikes
 
@@ -177,7 +226,7 @@ EBS snapshots are automated via AWS Data Lifecycle Manager (DLM):
 | `snapshot_retention_days` | `7` | Days to retain snapshots |
 | `snapshot_schedule_cron` | `cron(0 3 * * ? *)` | Daily at 3 AM UTC |
 
-Snapshots capture all EBS volumes on instances tagged with `Backup=true`. This preserves identity attestation data and configuration for disaster recovery.
+Snapshots capture all EBS volumes on instances tagged with `Backup=true`. This preserves network state, identity data, and configuration for disaster recovery.
 
 **Future backup features (planned):**
 - Infrastructure redundancy (multi-region, failover)

@@ -15,17 +15,27 @@ output "rendezvous2_public_ip" {
 output "rendezvous1_endpoints" {
   description = "All endpoints for rendezvous1"
   value = {
-    stun = module.rendezvous1.stun_endpoint
-    mesh = module.rendezvous1.mesh_endpoint
+    stun    = module.rendezvous1.stun_endpoint
+    omertad = module.rendezvous1.omertad_endpoint
   }
 }
 
 output "rendezvous2_endpoints" {
   description = "All endpoints for rendezvous2"
   value = {
-    stun = module.rendezvous2.stun_endpoint
-    mesh = module.rendezvous2.mesh_endpoint
+    stun    = module.rendezvous2.stun_endpoint
+    omertad = module.rendezvous2.omertad_endpoint
   }
+}
+
+# =============================================================================
+# Network Configuration Outputs
+# =============================================================================
+
+output "omerta_network_link" {
+  description = "omerta:// join link for clients to connect to this network"
+  value       = var.omerta_network_link
+  sensitive   = true
 }
 
 # =============================================================================

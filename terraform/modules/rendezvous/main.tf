@@ -1,5 +1,5 @@
 # Omerta Server Module
-# Creates an EC2 instance running omerta-stun and omerta-mesh
+# Creates an EC2 instance running omerta-stun and omertad
 
 terraform {
   required_providers {
@@ -34,11 +34,11 @@ resource "aws_security_group" "rendezvous" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Mesh bootstrap/relay (UDP)
+  # Omertad mesh network (UDP)
   ingress {
-    description = "Mesh Bootstrap"
-    from_port   = 5000
-    to_port     = 5000
+    description = "Omertad Mesh"
+    from_port   = 9999
+    to_port     = 9999
     protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }

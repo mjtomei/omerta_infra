@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy omerta-stun and omerta-mesh binaries to EC2 instances
+# Deploy omerta-stun, omertad, and omerta CLI binaries to EC2 instances
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,7 +28,7 @@ ENVIRONMENT="$1"
 SERVER="${2:-all}"
 
 # Check binaries exist
-if [ ! -f "$BUILD_DIR/omerta-stun" ] || [ ! -f "$BUILD_DIR/omerta-mesh" ]; then
+if [ ! -f "$BUILD_DIR/omerta-stun" ] || [ ! -f "$BUILD_DIR/omertad" ] || [ ! -f "$BUILD_DIR/omerta" ]; then
     echo "Error: Binaries not found in $BUILD_DIR"
     echo "Run ./scripts/build.sh first"
     exit 1
@@ -64,7 +64,8 @@ deploy_to_server() {
     echo "Uploading binaries..."
     scp -o StrictHostKeyChecking=no \
         "$BUILD_DIR/omerta-stun" \
-        "$BUILD_DIR/omerta-mesh" \
+        "$BUILD_DIR/omertad" \
+        "$BUILD_DIR/omerta" \
         "ec2-user@$ip:/tmp/"
 
     # Install and restart services
@@ -75,14 +76,28 @@ deploy_to_server() {
         sudo chmod +x /opt/omerta/omerta-stun
         sudo chown omerta:omerta /opt/omerta/omerta-stun
 
-        # Install omerta-mesh
-        sudo mv /tmp/omerta-mesh /opt/omerta/omerta-mesh
-        sudo chmod +x /opt/omerta/omerta-mesh
-        sudo chown omerta:omerta /opt/omerta/omerta-mesh
+        # Install omertad
+        sudo mv /tmp/omertad /opt/omerta/omertad
+        sudo chmod +x /opt/omerta/omertad
+        sudo chown omerta:omerta /opt/omerta/omertad
+
+        # Install omerta CLI
+        sudo mv /tmp/omerta /opt/omerta/omerta
+        sudo chmod +x /opt/omerta/omerta
+        sudo chown omerta:omerta /opt/omerta/omerta
+
+        # Add to PATH via symlink
+        sudo ln -sf /opt/omerta/omerta /usr/local/bin/omerta
 
         # Restart services
         sudo systemctl restart omerta-stun
-        sudo systemctl restart omerta-mesh
+
+        # Use omertad restart for graceful shutdown if running, otherwise just restart
+        if sudo systemctl is-active --quiet omertad; then
+            echo "Gracefully restarting omertad..."
+            sudo -u omerta /opt/omerta/omertad restart --timeout 30 || true
+        fi
+        sudo systemctl restart omertad
 
         sleep 2
 
@@ -91,7 +106,7 @@ deploy_to_server() {
         echo "---------------"
         sudo systemctl status omerta-stun --no-pager -l | head -10
         echo ""
-        sudo systemctl status omerta-mesh --no-pager -l | head -10
+        sudo systemctl status omertad --no-pager -l | head -10
 REMOTE
 
     echo "Deployed to $name successfully!"

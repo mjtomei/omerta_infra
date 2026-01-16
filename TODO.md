@@ -17,6 +17,21 @@
 - AWS Secrets Manager or KMS integration
 - Recovery procedures documentation
 
+## Data Persistence
+
+### Network State Protection
+When attestations and peer reputation are added, consider migrating from JSON files to SQLite with WAL mode for:
+- ACID transactions with automatic rollback
+- Protection against partial writes
+- Audit trail of changes
+
+Current storage locations:
+- `~/.omerta/OmertaMesh/networks.json` - Network memberships
+- `~/.omerta/config.json` - Network keys
+
+Short-term: Add backup rotation before writes
+Long-term: SQLite database with proper schema
+
 ## Identity System
 
 ### Peer ID Security Fix

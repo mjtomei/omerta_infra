@@ -81,3 +81,14 @@ variable "snapshot_schedule_cron" {
   type        = string
   default     = "cron(0 3 * * ? *)"
 }
+
+# =============================================================================
+# Network Configuration
+# =============================================================================
+
+variable "omerta_network_link" {
+  description = "omerta://join/... link created with 'omerta network create'. Set via TF_VAR_omerta_network_link."
+  type        = string
+  sensitive   = true
+  # No default - must be provided
+}
