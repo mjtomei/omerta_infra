@@ -11,11 +11,11 @@ usage() {
     echo ""
     echo "Arguments:"
     echo "  environment   Environment to deploy to (prod, staging)"
-    echo "  server        Optional: specific server (rendezvous1, rendezvous2, or 'all')"
+    echo "  server        Optional: specific server (bootstrap1, bootstrap2, or 'all')"
     echo ""
     echo "Examples:"
     echo "  $0 prod all              # Deploy to all prod servers"
-    echo "  $0 prod rendezvous1      # Deploy to rendezvous1 only"
+    echo "  $0 prod bootstrap1      # Deploy to bootstrap1 only"
     echo "  $0 staging               # Deploy to all staging servers"
     exit 1
 }
@@ -50,8 +50,8 @@ if [ ! -f "terraform.tfstate" ]; then
 fi
 
 # Get server IPs
-RENDEZVOUS1_IP=$(terraform output -raw rendezvous1_public_ip 2>/dev/null || echo "")
-RENDEZVOUS2_IP=$(terraform output -raw rendezvous2_public_ip 2>/dev/null || echo "")
+BOOTSTRAP1_IP=$(terraform output -raw bootstrap1_public_ip 2>/dev/null || echo "")
+BOOTSTRAP2_IP=$(terraform output -raw bootstrap2_public_ip 2>/dev/null || echo "")
 
 deploy_to_server() {
     local ip=$1
@@ -114,22 +114,22 @@ REMOTE
 
 case "$SERVER" in
     all)
-        [ -n "$RENDEZVOUS1_IP" ] && deploy_to_server "$RENDEZVOUS1_IP" "rendezvous1"
-        [ -n "$RENDEZVOUS2_IP" ] && deploy_to_server "$RENDEZVOUS2_IP" "rendezvous2"
+        [ -n "$BOOTSTRAP1_IP" ] && deploy_to_server "$BOOTSTRAP1_IP" "bootstrap1"
+        [ -n "$BOOTSTRAP2_IP" ] && deploy_to_server "$BOOTSTRAP2_IP" "bootstrap2"
         ;;
-    rendezvous1)
-        if [ -z "$RENDEZVOUS1_IP" ]; then
-            echo "Error: rendezvous1 IP not found"
+    bootstrap1)
+        if [ -z "$BOOTSTRAP1_IP" ]; then
+            echo "Error: bootstrap1 IP not found"
             exit 1
         fi
-        deploy_to_server "$RENDEZVOUS1_IP" "rendezvous1"
+        deploy_to_server "$BOOTSTRAP1_IP" "bootstrap1"
         ;;
-    rendezvous2)
-        if [ -z "$RENDEZVOUS2_IP" ]; then
-            echo "Error: rendezvous2 IP not found"
+    bootstrap2)
+        if [ -z "$BOOTSTRAP2_IP" ]; then
+            echo "Error: bootstrap2 IP not found"
             exit 1
         fi
-        deploy_to_server "$RENDEZVOUS2_IP" "rendezvous2"
+        deploy_to_server "$BOOTSTRAP2_IP" "bootstrap2"
         ;;
     *)
         echo "Error: Unknown server '$SERVER'"

@@ -1,6 +1,6 @@
 # Setup Guide
 
-This guide walks through setting up Omerta rendezvous servers on AWS EC2 with Route53 DNS.
+This guide walks through setting up Omerta bootstrap servers on AWS EC2 with Route53 DNS.
 
 ## Prerequisites
 
@@ -106,14 +106,14 @@ Configure these in Squarespace:
 
 **Important**: DNS propagation takes 24-48 hours. During this time, existing DNS records may be unavailable.
 
-## Step 6: Build the Binary
+## Step 6: Build the Binaries
 
 ```bash
 # From repo root
 ./scripts/build.sh
 ```
 
-This builds `omerta-rendezvous` for your platform. For cross-compilation to Linux (if building on macOS), see [Cross-Compilation](#cross-compilation).
+This builds `omerta-stun`, `omertad`, and `omerta` CLI for your platform. For cross-compilation to Linux (if building on macOS), see [Cross-Compilation](#cross-compilation).
 
 ## Step 7: Deploy to Servers
 
@@ -122,20 +122,37 @@ This builds `omerta-rendezvous` for your platform. For cross-compilation to Linu
 ./scripts/deploy.sh prod all
 
 # Or deploy to specific server
-./scripts/deploy.sh prod rendezvous1
+./scripts/deploy.sh prod bootstrap1
 ```
 
-## Step 8: Verify Deployment
+## Step 8: Initialize the Network
+
+```bash
+# Create the omerta-main network on the bootstrap servers
+./scripts/init-network.sh prod
+
+# The invite link will be saved to network-link.txt
+# Share this link with users to join the network
+```
+
+This script:
+1. Creates the network on bootstrap1
+2. Joins bootstrap2 to the network
+3. Adds both nodes as bootstrap peers
+4. Generates the final invite link
+
+## Step 9: Verify Deployment
 
 ```bash
 # Check service status
-ssh -i ~/.ssh/omerta-prod.pem ec2-user@<IP> "sudo systemctl status omerta-rendezvous"
+ssh -i ~/.ssh/omerta-prod.pem ec2-user@<IP> "sudo systemctl status omertad"
+ssh -i ~/.ssh/omerta-prod.pem ec2-user@<IP> "sudo systemctl status omerta-stun"
 
 # Test STUN endpoint
 # (use a STUN client or the mesh CLI)
 
 # Check logs
-ssh -i ~/.ssh/omerta-prod.pem ec2-user@<IP> "sudo tail -f /var/log/omerta/rendezvous.log"
+ssh -i ~/.ssh/omerta-prod.pem ec2-user@<IP> "sudo tail -f /var/log/omerta/omertad.log"
 ```
 
 ## Cross-Compilation
@@ -155,7 +172,7 @@ ssh -i ~/.ssh/omerta-prod.pem ec2-user@<IP>
 
 ```bash
 docker run --rm -v $(pwd)/omerta:/src -w /src swift:5.9 \
-  swift build -c release --product omerta-rendezvous
+  swift build -c release --product omertad --product omerta-stun --product omerta
 ```
 
 ## Troubleshooting
@@ -189,11 +206,12 @@ source .env
 ### Service won't start
 
 ```bash
-# Check binary exists and is executable
+# Check binaries exist and are executable
 ssh ec2-user@<IP> "ls -la /opt/omerta/"
 
 # Check service logs
-ssh ec2-user@<IP> "sudo journalctl -u omerta-rendezvous -n 50"
+ssh ec2-user@<IP> "sudo journalctl -u omertad -n 50"
+ssh ec2-user@<IP> "sudo journalctl -u omerta-stun -n 50"
 ```
 
 ## Security Notes

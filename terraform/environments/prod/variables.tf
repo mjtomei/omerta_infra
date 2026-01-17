@@ -27,7 +27,7 @@ variable "domain_name" {
 # =============================================================================
 
 variable "instance_type" {
-  description = "EC2 instance type for rendezvous servers"
+  description = "EC2 instance type for bootstrap servers"
   type        = string
   default     = "t3.micro"
 }
@@ -85,10 +85,5 @@ variable "snapshot_schedule_cron" {
 # =============================================================================
 # Network Configuration
 # =============================================================================
-
-variable "omerta_network_link" {
-  description = "omerta://join/... link created with 'omerta network create'. Set via TF_VAR_omerta_network_link."
-  type        = string
-  sensitive   = true
-  # No default - must be provided
-}
+# Network is initialized on the EC2 instances using scripts/init-network.sh
+# after deployment. No pre-configuration needed.

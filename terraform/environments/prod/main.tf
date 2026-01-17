@@ -1,5 +1,5 @@
-# Production Rendezvous Servers
-# Deploys multiple rendezvous servers for omerta.run subdomains
+# Production Bootstrap Servers
+# Deploys multiple bootstrap servers for omerta.run subdomains
 #
 # CREDENTIALS: AWS credentials are sourced from environment variables:
 #   - AWS_ACCESS_KEY_ID
@@ -21,7 +21,7 @@ terraform {
   # Uncomment and configure for remote state
   # backend "s3" {
   #   bucket = "omerta-terraform-state"
-  #   key    = "prod/rendezvous.tfstate"
+  #   key    = "prod/bootstrap.tfstate"
   #   region = "us-east-1"
   # }
 }
@@ -71,16 +71,14 @@ data "aws_ami" "amazon_linux_2023" {
 # =============================================================================
 # Network Configuration
 # =============================================================================
-# The omerta:// link is created locally using `omerta network create` and
-# passed to Terraform via the TF_VAR_omerta_network_link environment variable.
+# Network is initialized on the EC2 instances after deployment.
+# Run scripts/init-network.sh to create the omerta-main network.
 #
-# To create a network:
-#   omerta network create --name "omerta-prod" \
-#     --bootstrap "rendezvous1.omerta.run:9999" \
-#     --bootstrap "rendezvous2.omerta.run:9999"
-#
-# Then copy the omerta://join/... link and set:
-#   export TF_VAR_omerta_network_link="omerta://join/..."
+# The init script will:
+# 1. Create the network on bootstrap1
+# 2. Join bootstrap2 to the network
+# 3. Add both nodes as bootstrap peers
+# 4. Generate the final invite link
 
 # User data script to install dependencies and set up systemd services
 locals {
@@ -93,6 +91,9 @@ locals {
 
     # Install dependencies
     dnf install -y git gcc-c++ libcurl-devel libuuid-devel libxml2-devel ncurses-devel
+
+    # Install CloudWatch agent for disk and process monitoring
+    dnf install -y amazon-cloudwatch-agent
 
     # Create omerta user with home directory
     useradd -r -m -d /home/omerta -s /bin/bash omerta || true
@@ -114,14 +115,47 @@ locals {
 }
 LOGROTATE
 
-    # Write the network join link for first-boot initialization
-    # The omerta CLI will use this to join the network
-    cat > /home/omerta/.omerta/network-link.txt <<'LINK'
-    ${var.omerta_network_link}
-    LINK
-    chown omerta:omerta /home/omerta/.omerta/network-link.txt
+    # Configure CloudWatch agent for disk and process monitoring
+    mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
+    cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWAGENT'
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "root"
+  },
+  "metrics": {
+    "namespace": "Omerta/System",
+    "append_dimensions": {
+      "InstanceId": "$${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "disk": {
+        "measurement": ["used_percent"],
+        "metrics_collection_interval": 60,
+        "resources": ["/"],
+        "drop_device": true
+      },
+      "procstat": [
+        {
+          "pattern": "omertad",
+          "measurement": ["pid_count"]
+        },
+        {
+          "pattern": "omerta-stun",
+          "measurement": ["pid_count"]
+        }
+      ]
+    }
+  }
+}
+CWAGENT
+
+    # Start CloudWatch agent
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+    systemctl enable amazon-cloudwatch-agent
 
     # Create omertad config file
+    # Note: network= line will be added by init-network.sh after network creation
     # Note: can-relay is false to minimize bandwidth costs.
     # Set can-relay=true if you need to relay data for peers who can't establish direct connections.
     cat > /home/omerta/.omerta/omertad.conf <<'CONFIG'
@@ -183,63 +217,19 @@ LOGROTATE
     WantedBy=multi-user.target
     SERVICE
 
-    # Create first-boot script to join the network
-    cat > /opt/omerta/first-boot.sh <<'FIRSTBOOT'
-    #!/bin/bash
-    # First boot: join the omerta network using the provisioned link
-    set -e
-
-    LINK_FILE="/home/omerta/.omerta/network-link.txt"
-    JOINED_FLAG="/home/omerta/.omerta/.network-joined"
-    NETWORKS_JSON="/home/omerta/.omerta/OmertaMesh/networks.json"
-
-    if [ -f "$JOINED_FLAG" ]; then
-        echo "Network already joined, skipping..."
-        exit 0
-    fi
-
-    if [ ! -f "$LINK_FILE" ]; then
-        echo "No network link file found at $LINK_FILE"
-        exit 1
-    fi
-
-    LINK=$(cat "$LINK_FILE" | tr -d '[:space:]')
-
-    echo "Joining omerta network..."
-    /opt/omerta/omerta network join "$LINK"
-
-    # Get the network ID from the networks.json file
-    # The file is a JSON object where keys are network IDs
-    if [ -f "$NETWORKS_JSON" ]; then
-        # Extract first key from JSON object (the network ID)
-        NETWORK_ID=$(grep -o '"[a-f0-9]\{16\}"' "$NETWORKS_JSON" | head -1 | tr -d '"')
-    fi
-
-    if [ -n "$NETWORK_ID" ]; then
-        echo "network=$NETWORK_ID" >> /home/omerta/.omerta/omertad.conf
-        touch "$JOINED_FLAG"
-        echo "Successfully joined network: $NETWORK_ID"
-    else
-        echo "Warning: Could not determine network ID from $NETWORKS_JSON"
-        echo "You may need to manually add 'network=<id>' to /home/omerta/.omerta/omertad.conf"
-    fi
-    FIRSTBOOT
-    chmod +x /opt/omerta/first-boot.sh
-    chown omerta:omerta /opt/omerta/first-boot.sh
-
     systemctl daemon-reload
     systemctl enable omerta-stun
     systemctl enable omertad
 
-    echo "Setup complete. Deploy binaries to /opt/omerta/ and run first-boot.sh to join the network."
+    echo "Setup complete. Deploy binaries and run init-network.sh to initialize the network."
   EOF
 }
 
-# Primary rendezvous server
-module "rendezvous1" {
-  source = "../../modules/rendezvous"
+# Primary bootstrap server
+module "bootstrap1" {
+  source = "../../modules/bootstrap"
 
-  name          = "omerta-rendezvous1-prod"
+  name          = "omerta-bootstrap1-prod"
   vpc_id        = data.aws_vpc.default.id
   subnet_id     = data.aws_subnets.default.ids[0]
   ami_id        = data.aws_ami.amazon_linux_2023.id
@@ -253,17 +243,17 @@ module "rendezvous1" {
 
   tags = {
     Environment = "prod"
-    Service     = "rendezvous"
-    Domain      = "rendezvous1.omerta.run"
+    Service     = "bootstrap"
+    Domain      = "bootstrap1.omerta.run"
     Backup      = "true"
   }
 }
 
-# Secondary rendezvous server (different AZ for redundancy)
-module "rendezvous2" {
-  source = "../../modules/rendezvous"
+# Secondary bootstrap server (different AZ for redundancy)
+module "bootstrap2" {
+  source = "../../modules/bootstrap"
 
-  name          = "omerta-rendezvous2-prod"
+  name          = "omerta-bootstrap2-prod"
   vpc_id        = data.aws_vpc.default.id
   subnet_id     = length(data.aws_subnets.default.ids) > 1 ? data.aws_subnets.default.ids[1] : data.aws_subnets.default.ids[0]
   ami_id        = data.aws_ami.amazon_linux_2023.id
@@ -277,8 +267,8 @@ module "rendezvous2" {
 
   tags = {
     Environment = "prod"
-    Service     = "rendezvous"
-    Domain      = "rendezvous2.omerta.run"
+    Service     = "bootstrap"
+    Domain      = "bootstrap2.omerta.run"
     Backup      = "true"
   }
 }
@@ -299,40 +289,40 @@ resource "aws_route53_zone" "omerta" {
   }
 }
 
-# rendezvous1.omerta.run -> Primary rendezvous server
-resource "aws_route53_record" "rendezvous1" {
+# bootstrap1.omerta.run -> Primary bootstrap server
+resource "aws_route53_record" "bootstrap1" {
   zone_id = aws_route53_zone.omerta.zone_id
-  name    = "rendezvous1.${var.domain_name}"
+  name    = "bootstrap1.${var.domain_name}"
   type    = "A"
   ttl     = 300
-  records = [module.rendezvous1.public_ip]
+  records = [module.bootstrap1.public_ip]
 }
 
-# rendezvous2.omerta.run -> Secondary rendezvous server
-resource "aws_route53_record" "rendezvous2" {
+# bootstrap2.omerta.run -> Secondary bootstrap server
+resource "aws_route53_record" "bootstrap2" {
   zone_id = aws_route53_zone.omerta.zone_id
-  name    = "rendezvous2.${var.domain_name}"
+  name    = "bootstrap2.${var.domain_name}"
   type    = "A"
   ttl     = 300
-  records = [module.rendezvous2.public_ip]
+  records = [module.bootstrap2.public_ip]
 }
 
-# stun1.omerta.run -> Alias to rendezvous1 (for STUN-specific endpoint)
+# stun1.omerta.run -> Alias to bootstrap1 (for STUN-specific endpoint)
 resource "aws_route53_record" "stun1" {
   zone_id = aws_route53_zone.omerta.zone_id
   name    = "stun1.${var.domain_name}"
   type    = "A"
   ttl     = 300
-  records = [module.rendezvous1.public_ip]
+  records = [module.bootstrap1.public_ip]
 }
 
-# stun2.omerta.run -> Alias to rendezvous2 (for STUN-specific endpoint)
+# stun2.omerta.run -> Alias to bootstrap2 (for STUN-specific endpoint)
 resource "aws_route53_record" "stun2" {
   zone_id = aws_route53_zone.omerta.zone_id
   name    = "stun2.${var.domain_name}"
   type    = "A"
   ttl     = 300
-  records = [module.rendezvous2.public_ip]
+  records = [module.bootstrap2.public_ip]
 }
 
 # =============================================================================
@@ -364,9 +354,9 @@ locals {
   bandwidth_threshold_bytes = var.bandwidth_cap_gb * 0.8 * 1073741824 / (30 * 24 * 12)
 }
 
-# Bandwidth alarm for rendezvous1
-resource "aws_cloudwatch_metric_alarm" "rendezvous1_bandwidth" {
-  alarm_name          = "omerta-rendezvous1-bandwidth-warning"
+# Bandwidth alarm for bootstrap1
+resource "aws_cloudwatch_metric_alarm" "bootstrap1_bandwidth" {
+  alarm_name          = "omerta-bootstrap1-bandwidth-warning"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "NetworkOut"
@@ -378,7 +368,7 @@ resource "aws_cloudwatch_metric_alarm" "rendezvous1_bandwidth" {
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    InstanceId = module.rendezvous1.instance_id
+    InstanceId = module.bootstrap1.instance_id
   }
 
   # Only send to SNS if email is configured
@@ -387,13 +377,13 @@ resource "aws_cloudwatch_metric_alarm" "rendezvous1_bandwidth" {
 
   tags = {
     Environment = "prod"
-    Service     = "rendezvous"
+    Service     = "bootstrap"
   }
 }
 
-# Bandwidth alarm for rendezvous2
-resource "aws_cloudwatch_metric_alarm" "rendezvous2_bandwidth" {
-  alarm_name          = "omerta-rendezvous2-bandwidth-warning"
+# Bandwidth alarm for bootstrap2
+resource "aws_cloudwatch_metric_alarm" "bootstrap2_bandwidth" {
+  alarm_name          = "omerta-bootstrap2-bandwidth-warning"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "NetworkOut"
@@ -405,7 +395,7 @@ resource "aws_cloudwatch_metric_alarm" "rendezvous2_bandwidth" {
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    InstanceId = module.rendezvous2.instance_id
+    InstanceId = module.bootstrap2.instance_id
   }
 
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
@@ -413,7 +403,7 @@ resource "aws_cloudwatch_metric_alarm" "rendezvous2_bandwidth" {
 
   tags = {
     Environment = "prod"
-    Service     = "rendezvous"
+    Service     = "bootstrap"
   }
 }
 
@@ -483,7 +473,7 @@ resource "aws_dlm_lifecycle_policy" "ebs_snapshots" {
       tags_to_add = {
         SnapshotCreator = "DLM"
         Environment     = "prod"
-        Service         = "rendezvous"
+        Service         = "bootstrap"
       }
 
       copy_tags = true
@@ -493,5 +483,173 @@ resource "aws_dlm_lifecycle_policy" "ebs_snapshots" {
   tags = {
     Environment = "prod"
     ManagedBy   = "terraform"
+  }
+}
+
+# =============================================================================
+# System Health Alarms (Disk Space, Process Monitoring)
+# =============================================================================
+# These alarms use CloudWatch agent metrics from the Omerta/System namespace.
+# Metrics are collected every 60 seconds.
+
+# Disk space alarm for bootstrap1 (>80% used)
+resource "aws_cloudwatch_metric_alarm" "bootstrap1_disk" {
+  alarm_name          = "omerta-bootstrap1-disk-space-warning"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "disk_used_percent"
+  namespace           = "Omerta/System"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Disk usage exceeding 80% on bootstrap1"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    InstanceId = module.bootstrap1.instance_id
+    path       = "/"
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "bootstrap"
+  }
+}
+
+# Disk space alarm for bootstrap2 (>80% used)
+resource "aws_cloudwatch_metric_alarm" "bootstrap2_disk" {
+  alarm_name          = "omerta-bootstrap2-disk-space-warning"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "disk_used_percent"
+  namespace           = "Omerta/System"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Disk usage exceeding 80% on bootstrap2"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    InstanceId = module.bootstrap2.instance_id
+    path       = "/"
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "bootstrap"
+  }
+}
+
+# Process alarm for omertad on bootstrap1 (alert if not running)
+resource "aws_cloudwatch_metric_alarm" "bootstrap1_omertad" {
+  alarm_name          = "omerta-bootstrap1-omertad-not-running"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "procstat_lookup_pid_count"
+  namespace           = "Omerta/System"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  alarm_description   = "omertad process not running on bootstrap1"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    InstanceId = module.bootstrap1.instance_id
+    pattern    = "omertad"
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "bootstrap"
+  }
+}
+
+# Process alarm for omertad on bootstrap2 (alert if not running)
+resource "aws_cloudwatch_metric_alarm" "bootstrap2_omertad" {
+  alarm_name          = "omerta-bootstrap2-omertad-not-running"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "procstat_lookup_pid_count"
+  namespace           = "Omerta/System"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  alarm_description   = "omertad process not running on bootstrap2"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    InstanceId = module.bootstrap2.instance_id
+    pattern    = "omertad"
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "bootstrap"
+  }
+}
+
+# Process alarm for omerta-stun on bootstrap1 (alert if not running)
+resource "aws_cloudwatch_metric_alarm" "bootstrap1_stun" {
+  alarm_name          = "omerta-bootstrap1-stun-not-running"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "procstat_lookup_pid_count"
+  namespace           = "Omerta/System"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  alarm_description   = "omerta-stun process not running on bootstrap1"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    InstanceId = module.bootstrap1.instance_id
+    pattern    = "omerta-stun"
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "bootstrap"
+  }
+}
+
+# Process alarm for omerta-stun on bootstrap2 (alert if not running)
+resource "aws_cloudwatch_metric_alarm" "bootstrap2_stun" {
+  alarm_name          = "omerta-bootstrap2-stun-not-running"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "procstat_lookup_pid_count"
+  namespace           = "Omerta/System"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  alarm_description   = "omerta-stun process not running on bootstrap2"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    InstanceId = module.bootstrap2.instance_id
+    pattern    = "omerta-stun"
+  }
+
+  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
+
+  tags = {
+    Environment = "prod"
+    Service     = "bootstrap"
   }
 }

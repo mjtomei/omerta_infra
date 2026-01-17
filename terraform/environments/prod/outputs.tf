@@ -2,40 +2,39 @@
 # EC2 Outputs
 # =============================================================================
 
-output "rendezvous1_public_ip" {
-  description = "Public IP for rendezvous1.omerta.run"
-  value       = module.rendezvous1.public_ip
+output "bootstrap1_public_ip" {
+  description = "Public IP for bootstrap1.omerta.run"
+  value       = module.bootstrap1.public_ip
 }
 
-output "rendezvous2_public_ip" {
-  description = "Public IP for rendezvous2.omerta.run"
-  value       = module.rendezvous2.public_ip
+output "bootstrap2_public_ip" {
+  description = "Public IP for bootstrap2.omerta.run"
+  value       = module.bootstrap2.public_ip
 }
 
-output "rendezvous1_endpoints" {
-  description = "All endpoints for rendezvous1"
+output "bootstrap1_endpoints" {
+  description = "All endpoints for bootstrap1"
   value = {
-    stun    = module.rendezvous1.stun_endpoint
-    omertad = module.rendezvous1.omertad_endpoint
+    stun    = module.bootstrap1.stun_endpoint
+    omertad = module.bootstrap1.omertad_endpoint
   }
 }
 
-output "rendezvous2_endpoints" {
-  description = "All endpoints for rendezvous2"
+output "bootstrap2_endpoints" {
+  description = "All endpoints for bootstrap2"
   value = {
-    stun    = module.rendezvous2.stun_endpoint
-    omertad = module.rendezvous2.omertad_endpoint
+    stun    = module.bootstrap2.stun_endpoint
+    omertad = module.bootstrap2.omertad_endpoint
   }
 }
 
 # =============================================================================
-# Network Configuration Outputs
+# Domain Configuration
 # =============================================================================
 
-output "omerta_network_link" {
-  description = "omerta:// join link for clients to connect to this network"
-  value       = var.omerta_network_link
-  sensitive   = true
+output "domain_name" {
+  description = "Domain name used for bootstrap servers"
+  value       = var.domain_name
 }
 
 # =============================================================================
@@ -55,10 +54,10 @@ output "route53_nameservers" {
 output "dns_records_created" {
   description = "DNS records managed by Terraform"
   value = {
-    "rendezvous1.${var.domain_name}" = module.rendezvous1.public_ip
-    "rendezvous2.${var.domain_name}" = module.rendezvous2.public_ip
-    "stun1.${var.domain_name}"       = module.rendezvous1.public_ip
-    "stun2.${var.domain_name}"       = module.rendezvous2.public_ip
+    "bootstrap1.${var.domain_name}" = module.bootstrap1.public_ip
+    "bootstrap2.${var.domain_name}" = module.bootstrap2.public_ip
+    "stun1.${var.domain_name}"      = module.bootstrap1.public_ip
+    "stun2.${var.domain_name}"      = module.bootstrap2.public_ip
   }
 }
 

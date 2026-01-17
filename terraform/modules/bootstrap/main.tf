@@ -1,4 +1,4 @@
-# Omerta Server Module
+# Omerta Bootstrap Server Module
 # Creates an EC2 instance running omerta-stun and omertad
 
 terraform {
@@ -10,8 +10,40 @@ terraform {
   }
 }
 
+# IAM role for EC2 instance (CloudWatch agent permissions)
+resource "aws_iam_role" "instance" {
+  name = "${var.name}-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
+  role       = aws_iam_role.instance.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_instance_profile" "instance" {
+  name = "${var.name}-profile"
+  role = aws_iam_role.instance.name
+
+  tags = var.tags
+}
+
 # Security group for omerta server
-resource "aws_security_group" "rendezvous" {
+resource "aws_security_group" "bootstrap" {
   name        = "${var.name}-sg"
   description = "Security group for Omerta STUN and Mesh servers"
   vpc_id      = var.vpc_id
@@ -57,12 +89,13 @@ resource "aws_security_group" "rendezvous" {
 }
 
 # EC2 instance
-resource "aws_instance" "rendezvous" {
+resource "aws_instance" "bootstrap" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
   key_name               = var.key_name
-  vpc_security_group_ids = [aws_security_group.rendezvous.id]
+  vpc_security_group_ids = [aws_security_group.bootstrap.id]
   subnet_id              = var.subnet_id
+  iam_instance_profile   = aws_iam_instance_profile.instance.name
 
   root_block_device {
     volume_size = var.volume_size
@@ -77,9 +110,9 @@ resource "aws_instance" "rendezvous" {
 }
 
 # Elastic IP for stable public address
-resource "aws_eip" "rendezvous" {
+resource "aws_eip" "bootstrap" {
   count    = var.create_eip ? 1 : 0
-  instance = aws_instance.rendezvous.id
+  instance = aws_instance.bootstrap.id
   domain   = "vpc"
 
   tags = merge(var.tags, {
