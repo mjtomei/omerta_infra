@@ -191,6 +191,7 @@ LOGROTATE
 
     LINK_FILE="/home/omerta/.omerta/network-link.txt"
     JOINED_FLAG="/home/omerta/.omerta/.network-joined"
+    NETWORKS_JSON="/home/omerta/.omerta/OmertaMesh/networks.json"
 
     if [ -f "$JOINED_FLAG" ]; then
         echo "Network already joined, skipping..."
@@ -207,15 +208,20 @@ LOGROTATE
     echo "Joining omerta network..."
     /opt/omerta/omerta network join "$LINK"
 
-    # Get the network ID and update config
-    NETWORK_ID=$(/opt/omerta/omerta network list --json 2>/dev/null | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    # Get the network ID from the networks.json file
+    # The file is a JSON object where keys are network IDs
+    if [ -f "$NETWORKS_JSON" ]; then
+        # Extract first key from JSON object (the network ID)
+        NETWORK_ID=$(grep -o '"[a-f0-9]\{16\}"' "$NETWORKS_JSON" | head -1 | tr -d '"')
+    fi
 
     if [ -n "$NETWORK_ID" ]; then
         echo "network=$NETWORK_ID" >> /home/omerta/.omerta/omertad.conf
         touch "$JOINED_FLAG"
         echo "Successfully joined network: $NETWORK_ID"
     else
-        echo "Warning: Could not determine network ID"
+        echo "Warning: Could not determine network ID from $NETWORKS_JSON"
+        echo "You may need to manually add 'network=<id>' to /home/omerta/.omerta/omertad.conf"
     fi
     FIRSTBOOT
     chmod +x /opt/omerta/first-boot.sh
