@@ -80,6 +80,15 @@ data "aws_ami" "amazon_linux_2023" {
 # 3. Add both nodes as bootstrap peers
 # 4. Generate the final invite link
 
+# Common tags for all resources - makes them easy to find and audit
+locals {
+  common_tags = {
+    Project     = "omerta"
+    Environment = "omerta-prod"
+    ManagedBy   = "omerta-terraform"
+  }
+}
+
 # User data script to install dependencies and set up systemd services
 locals {
   user_data = <<-EOF
@@ -241,12 +250,11 @@ module "bootstrap1" {
 
   ssh_cidr_blocks = var.ssh_cidr_blocks
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-    Domain      = "bootstrap1.omerta.run"
-    Backup      = "true"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+    Domain  = "bootstrap1.omerta.run"
+    Backup  = "true"
+  })
 }
 
 # Secondary bootstrap server (different AZ for redundancy)
@@ -265,12 +273,11 @@ module "bootstrap2" {
 
   ssh_cidr_blocks = var.ssh_cidr_blocks
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-    Domain      = "bootstrap2.omerta.run"
-    Backup      = "true"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+    Domain  = "bootstrap2.omerta.run"
+    Backup  = "true"
+  })
 }
 
 # =============================================================================
@@ -283,10 +290,7 @@ resource "aws_route53_zone" "omerta" {
   name    = var.domain_name
   comment = "Managed by Terraform - Omerta infrastructure"
 
-  tags = {
-    Environment = "prod"
-    ManagedBy   = "terraform"
-  }
+  tags = local.common_tags
 }
 
 # bootstrap1.omerta.run -> Primary bootstrap server
@@ -334,10 +338,7 @@ resource "aws_sns_topic" "bandwidth_alerts" {
   count = var.alert_email != "" ? 1 : 0
   name  = "omerta-bandwidth-alerts"
 
-  tags = {
-    Environment = "prod"
-    ManagedBy   = "terraform"
-  }
+  tags = local.common_tags
 }
 
 resource "aws_sns_topic_subscription" "bandwidth_alerts_email" {
@@ -375,10 +376,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap1_bandwidth" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # Bandwidth alarm for bootstrap2
@@ -401,10 +401,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap2_bandwidth" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # =============================================================================
@@ -431,10 +430,7 @@ resource "aws_iam_role" "dlm_lifecycle_role" {
     ]
   })
 
-  tags = {
-    Environment = "prod"
-    ManagedBy   = "terraform"
-  }
+  tags = local.common_tags
 }
 
 resource "aws_iam_role_policy_attachment" "dlm_lifecycle" {
@@ -472,7 +468,8 @@ resource "aws_dlm_lifecycle_policy" "ebs_snapshots" {
 
       tags_to_add = {
         SnapshotCreator = "DLM"
-        Environment     = "prod"
+        Project         = "omerta"
+        Environment     = "omerta-prod"
         Service         = "bootstrap"
       }
 
@@ -480,10 +477,7 @@ resource "aws_dlm_lifecycle_policy" "ebs_snapshots" {
     }
   }
 
-  tags = {
-    Environment = "prod"
-    ManagedBy   = "terraform"
-  }
+  tags = local.common_tags
 }
 
 # =============================================================================
@@ -513,10 +507,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap1_disk" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # Disk space alarm for bootstrap2 (>80% used)
@@ -540,10 +533,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap2_disk" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # Process alarm for omertad on bootstrap1 (alert if not running)
@@ -567,10 +559,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap1_omertad" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # Process alarm for omertad on bootstrap2 (alert if not running)
@@ -594,10 +585,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap2_omertad" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # Process alarm for omerta-stun on bootstrap1 (alert if not running)
@@ -621,10 +611,9 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap1_stun" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }
 
 # Process alarm for omerta-stun on bootstrap2 (alert if not running)
@@ -648,8 +637,7 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap2_stun" {
   alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
   ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
 
-  tags = {
-    Environment = "prod"
-    Service     = "bootstrap"
-  }
+  tags = merge(local.common_tags, {
+    Service = "bootstrap"
+  })
 }

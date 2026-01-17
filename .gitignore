@@ -43,3 +43,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# AWS CLI download artifacts
+awscliv2.zip
+aws/
