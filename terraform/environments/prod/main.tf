@@ -178,13 +178,8 @@ ipset add blocked_ranges 222.186.0.0/16 -exist
 ipset add blocked_ranges 5.188.0.0/16 -exist
 ipset add blocked_ranges 193.106.0.0/16 -exist
 
-# Apply iptables rules - allow only STUN and omertad from blocked ranges, drop everything else
+# Apply iptables rules - allow only omertad from blocked ranges, drop everything else
 # Rules are evaluated in order, so ACCEPT rules must come before DROP
-
-# Allow STUN (UDP 3478) from blocked ranges
-if ! iptables -C INPUT -p udp --dport 3478 -m set --match-set blocked_ranges src -j ACCEPT 2>/dev/null; then
-    iptables -I INPUT -p udp --dport 3478 -m set --match-set blocked_ranges src -j ACCEPT
-fi
 
 # Allow omertad (UDP 9999) from blocked ranges
 if ! iptables -C INPUT -p udp --dport 9999 -m set --match-set blocked_ranges src -j ACCEPT 2>/dev/null; then
@@ -276,10 +271,6 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWAGE
         {
           "pattern": "omertad",
           "measurement": ["pid_count"]
-        },
-        {
-          "pattern": "omerta-stun",
-          "measurement": ["pid_count"]
         }
       ]
     }
@@ -311,26 +302,6 @@ can-coordinate-hole-punch=true
 CONFIG
 chown omerta:omerta /home/omerta/.omerta/omertad.conf
 
-# Create omerta-stun systemd service
-cat > /etc/systemd/system/omerta-stun.service <<'SERVICE'
-[Unit]
-Description=Omerta STUN Server
-After=network.target
-
-[Service]
-Type=simple
-User=omerta
-Group=omerta
-ExecStart=/opt/omerta/omerta-stun --port 3478 --log-level info
-Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/omerta/stun.log
-StandardError=append:/var/log/omerta/stun.log
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
 # Create omertad systemd service
 # Note: Network ID will be set after first boot when joining the network
 cat > /etc/systemd/system/omertad.service <<'SERVICE'
@@ -355,7 +326,6 @@ WantedBy=multi-user.target
 SERVICE
 
 systemctl daemon-reload
-systemctl enable omerta-stun
 systemctl enable omertad
 
 echo "Setup complete. Deploy binaries and run init-network.sh to initialize the network."
@@ -434,24 +404,6 @@ resource "aws_route53_record" "bootstrap1" {
 resource "aws_route53_record" "bootstrap2" {
   zone_id = aws_route53_zone.omerta.zone_id
   name    = "bootstrap2.${var.domain_name}"
-  type    = "A"
-  ttl     = 300
-  records = [module.bootstrap2.public_ip]
-}
-
-# stun1.omerta.run -> Alias to bootstrap1 (for STUN-specific endpoint)
-resource "aws_route53_record" "stun1" {
-  zone_id = aws_route53_zone.omerta.zone_id
-  name    = "stun1.${var.domain_name}"
-  type    = "A"
-  ttl     = 300
-  records = [module.bootstrap1.public_ip]
-}
-
-# stun2.omerta.run -> Alias to bootstrap2 (for STUN-specific endpoint)
-resource "aws_route53_record" "stun2" {
-  zone_id = aws_route53_zone.omerta.zone_id
-  name    = "stun2.${var.domain_name}"
   type    = "A"
   ttl     = 300
   records = [module.bootstrap2.public_ip]
@@ -718,54 +670,3 @@ resource "aws_cloudwatch_metric_alarm" "bootstrap2_omertad" {
   })
 }
 
-# Process alarm for omerta-stun on bootstrap1 (alert if not running)
-resource "aws_cloudwatch_metric_alarm" "bootstrap1_stun" {
-  alarm_name          = "omerta-bootstrap1-stun-not-running"
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "procstat_lookup_pid_count"
-  namespace           = "Omerta/System"
-  period              = 60
-  statistic           = "Minimum"
-  threshold           = 1
-  alarm_description   = "omerta-stun process not running on bootstrap1"
-  treat_missing_data  = "breaching"
-
-  dimensions = {
-    InstanceId = module.bootstrap1.instance_id
-    pattern    = "omerta-stun"
-  }
-
-  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
-  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
-
-  tags = merge(local.common_tags, {
-    Service = "bootstrap"
-  })
-}
-
-# Process alarm for omerta-stun on bootstrap2 (alert if not running)
-resource "aws_cloudwatch_metric_alarm" "bootstrap2_stun" {
-  alarm_name          = "omerta-bootstrap2-stun-not-running"
-  comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 2
-  metric_name         = "procstat_lookup_pid_count"
-  namespace           = "Omerta/System"
-  period              = 60
-  statistic           = "Minimum"
-  threshold           = 1
-  alarm_description   = "omerta-stun process not running on bootstrap2"
-  treat_missing_data  = "breaching"
-
-  dimensions = {
-    InstanceId = module.bootstrap2.instance_id
-    pattern    = "omerta-stun"
-  }
-
-  alarm_actions = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
-  ok_actions    = var.alert_email != "" ? [aws_sns_topic.bandwidth_alerts[0].arn] : []
-
-  tags = merge(local.common_tags, {
-    Service = "bootstrap"
-  })
-}

@@ -1,5 +1,5 @@
 # Omerta Bootstrap Server Module
-# Creates an EC2 instance running omerta-stun and omertad
+# Creates an EC2 instance running omertad
 
 terraform {
   required_providers {
@@ -45,7 +45,7 @@ resource "aws_iam_instance_profile" "instance" {
 # Security group for omerta server
 resource "aws_security_group" "bootstrap" {
   name        = "${var.name}-sg"
-  description = "Security group for Omerta STUN and Mesh servers"
+  description = "Security group for Omerta Mesh servers"
   vpc_id      = var.vpc_id
 
   # SSH access
@@ -55,15 +55,6 @@ resource "aws_security_group" "bootstrap" {
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = var.ssh_cidr_blocks
-  }
-
-  # STUN server (UDP)
-  ingress {
-    description = "STUN"
-    from_port   = 3478
-    to_port     = 3478
-    protocol    = "udp"
-    cidr_blocks = ["0.0.0.0/0"]
   }
 
   # Omertad mesh network (UDP)

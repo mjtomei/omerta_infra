@@ -15,7 +15,6 @@ output "bootstrap2_public_ip" {
 output "bootstrap1_endpoints" {
   description = "All endpoints for bootstrap1"
   value = {
-    stun    = module.bootstrap1.stun_endpoint
     omertad = module.bootstrap1.omertad_endpoint
   }
 }
@@ -23,7 +22,6 @@ output "bootstrap1_endpoints" {
 output "bootstrap2_endpoints" {
   description = "All endpoints for bootstrap2"
   value = {
-    stun    = module.bootstrap2.stun_endpoint
     omertad = module.bootstrap2.omertad_endpoint
   }
 }
@@ -56,8 +54,6 @@ output "dns_records_created" {
   value = {
     "bootstrap1.${var.domain_name}" = module.bootstrap1.public_ip
     "bootstrap2.${var.domain_name}" = module.bootstrap2.public_ip
-    "stun1.${var.domain_name}"      = module.bootstrap1.public_ip
-    "stun2.${var.domain_name}"      = module.bootstrap2.public_ip
   }
 }
 

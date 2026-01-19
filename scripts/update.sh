@@ -191,7 +191,7 @@ else
     log "Skipping build (--skip-build)"
     # Verify binaries exist
     BUILD_DIR="$ROOT_DIR/build"
-    if [ ! -f "$BUILD_DIR/omerta-stun" ] || [ ! -f "$BUILD_DIR/omertad" ]; then
+    if [ ! -f "$BUILD_DIR/omertad" ] || [ ! -f "$BUILD_DIR/omerta" ]; then
         log_error "Binaries not found in $BUILD_DIR. Remove --skip-build or run build.sh first."
         exit 1
     fi
@@ -240,11 +240,11 @@ deploy_to_server() {
     log "Deploying to $name ($ip)..."
 
     if $DRY_RUN; then
-        echo "  Would upload: omerta-stun, omertad, omerta"
+        echo "  Would upload: omertad, omerta"
         if $UPDATE_CONFIG; then
             echo "  Would update: /home/omerta/.omerta/omertad.conf"
         fi
-        echo "  Would restart: omerta-stun, omertad"
+        echo "  Would restart: omertad"
         return 0
     fi
 
@@ -253,7 +253,6 @@ deploy_to_server() {
     # Upload binaries
     log "  Uploading binaries..."
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-        "$BUILD_DIR/omerta-stun" \
         "$BUILD_DIR/omertad" \
         "$BUILD_DIR/omerta" \
         "omerta@$ip:/tmp/"
@@ -293,17 +292,13 @@ CONF
         set -e
 
         # Install binaries
-        sudo mv /tmp/omerta-stun /opt/omerta/omerta-stun
         sudo mv /tmp/omertad /opt/omerta/omertad
         sudo mv /tmp/omerta /opt/omerta/omerta
-        sudo chmod +x /opt/omerta/omerta-stun /opt/omerta/omertad /opt/omerta/omerta
-        sudo chown omerta:omerta /opt/omerta/omerta-stun /opt/omerta/omertad /opt/omerta/omerta
+        sudo chmod +x /opt/omerta/omertad /opt/omerta/omerta
+        sudo chown omerta:omerta /opt/omerta/omertad /opt/omerta/omerta
         sudo ln -sf /opt/omerta/omerta /usr/local/bin/omerta
 
         $CONFIG_CMD
-
-        # Restart omerta-stun
-        sudo systemctl restart omerta-stun
 
         # Graceful restart for omertad if running
         if sudo systemctl is-active --quiet omertad; then
@@ -315,12 +310,6 @@ CONF
         sleep 2
 
         # Verify services are running
-        if ! sudo systemctl is-active --quiet omerta-stun; then
-            echo "ERROR: omerta-stun failed to start"
-            sudo journalctl -u omerta-stun -n 10 --no-pager
-            exit 1
-        fi
-
         if ! sudo systemctl is-active --quiet omertad; then
             echo "ERROR: omertad failed to start"
             sudo journalctl -u omertad -n 10 --no-pager
@@ -343,7 +332,7 @@ wait_for_health() {
 
     while [ $attempt -le $max_attempts ]; do
         if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "omerta@$ip" \
-            "sudo systemctl is-active --quiet omertad && sudo systemctl is-active --quiet omerta-stun" 2>/dev/null; then
+            "sudo systemctl is-active --quiet omertad" 2>/dev/null; then
             log_success "  $name is healthy"
             return 0
         fi
@@ -393,7 +382,7 @@ if ! $DRY_RUN; then
         echo ""
         echo "=== $name ($ip) ==="
         ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$ip" \
-            "sudo systemctl status omerta-stun --no-pager -l 2>&1 | head -5; echo ''; sudo systemctl status omertad --no-pager -l 2>&1 | head -5" \
+            "sudo systemctl status omertad --no-pager -l 2>&1 | head -5" \
             2>/dev/null || echo "Could not get status"
     done
 fi

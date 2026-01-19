@@ -129,13 +129,8 @@ ipset add blocked_ranges 222.186.0.0/16 -exist
 ipset add blocked_ranges 5.188.0.0/16 -exist
 ipset add blocked_ranges 193.106.0.0/16 -exist
 
-# Apply iptables rules - allow only STUN and omertad from blocked ranges, drop everything else
+# Apply iptables rules - allow only omertad from blocked ranges, drop everything else
 # Rules are evaluated in order, so ACCEPT rules must come before DROP
-
-# Allow STUN (UDP 3478) from blocked ranges
-if ! iptables -C INPUT -p udp --dport 3478 -m set --match-set blocked_ranges src -j ACCEPT 2>/dev/null; then
-    iptables -I INPUT -p udp --dport 3478 -m set --match-set blocked_ranges src -j ACCEPT
-fi
 
 # Allow omertad (UDP 9999) from blocked ranges
 if ! iptables -C INPUT -p udp --dport 9999 -m set --match-set blocked_ranges src -j ACCEPT 2>/dev/null; then
@@ -211,26 +206,7 @@ can-coordinate-hole-punch=true
 CONFIG
 chown omerta:omerta /home/omerta/.omerta/omertad.conf
 
-# Create systemd services
-cat > /etc/systemd/system/omerta-stun.service <<'SERVICE'
-[Unit]
-Description=Omerta STUN Server
-After=network.target
-
-[Service]
-Type=simple
-User=omerta
-Group=omerta
-ExecStart=/opt/omerta/omerta-stun --port 3478 --log-level info
-Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/omerta/stun.log
-StandardError=append:/var/log/omerta/stun.log
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
+# Create systemd service
 cat > /etc/systemd/system/omertad.service <<'SERVICE'
 [Unit]
 Description=Omerta Daemon
@@ -253,7 +229,6 @@ WantedBy=multi-user.target
 SERVICE
 
 systemctl daemon-reload
-systemctl enable omerta-stun
 systemctl enable omertad
 
 echo "Staging setup complete."
@@ -324,18 +299,3 @@ resource "aws_route53_record" "bootstrap2" {
   records = [module.bootstrap2.public_ip]
 }
 
-resource "aws_route53_record" "stun1" {
-  zone_id = data.aws_route53_zone.omerta.zone_id
-  name    = "staging-stun1.${var.domain_name}"
-  type    = "A"
-  ttl     = 300
-  records = [module.bootstrap1.public_ip]
-}
-
-resource "aws_route53_record" "stun2" {
-  zone_id = data.aws_route53_zone.omerta.zone_id
-  name    = "staging-stun2.${var.domain_name}"
-  type    = "A"
-  ttl     = 300
-  records = [module.bootstrap2.public_ip]
-}

@@ -18,11 +18,6 @@ output "security_group_id" {
   value       = aws_security_group.bootstrap.id
 }
 
-output "stun_endpoint" {
-  description = "STUN server endpoint"
-  value       = "${var.create_eip ? aws_eip.bootstrap[0].public_ip : aws_instance.bootstrap.public_ip}:3478"
-}
-
 output "omertad_endpoint" {
   description = "Omertad mesh endpoint"
   value       = "${var.create_eip ? aws_eip.bootstrap[0].public_ip : aws_instance.bootstrap.public_ip}:9999"

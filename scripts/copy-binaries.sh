@@ -69,7 +69,6 @@ trap "rm -rf $TEMP_DIR" EXIT
 
 echo "=== Downloading binaries from $SOURCE_SERVER ($SOURCE_IP) ==="
 scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-    "omerta@$SOURCE_IP:/opt/omerta/omerta-stun" \
     "omerta@$SOURCE_IP:/opt/omerta/omertad" \
     "omerta@$SOURCE_IP:/opt/omerta/omerta" \
     "$TEMP_DIR/"
@@ -85,26 +84,22 @@ for target_info in "${TARGETS[@]}"; do
     echo "=== Copying to $name ($ip) ==="
 
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-        "$TEMP_DIR/omerta-stun" \
         "$TEMP_DIR/omertad" \
         "$TEMP_DIR/omerta" \
         "omerta@$ip:/tmp/"
 
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$ip" << 'REMOTE'
-        sudo mv /tmp/omerta-stun /opt/omerta/
         sudo mv /tmp/omertad /opt/omerta/
         sudo mv /tmp/omerta /opt/omerta/
         sudo chown omerta:omerta /opt/omerta/*
         sudo chmod +x /opt/omerta/*
         sudo ln -sf /opt/omerta/omerta /usr/local/bin/omerta
 
-        sudo systemctl restart omerta-stun
         sudo systemctl restart omertad
 
         sleep 2
 
         echo "Service status:"
-        sudo systemctl status omerta-stun --no-pager | head -5
         sudo systemctl status omertad --no-pager | head -5
 REMOTE
 

@@ -149,11 +149,10 @@ fi
 
 echo ""
 echo "=== Building ==="
-swift build -c release --product omerta-stun --product omertad --product omerta
+swift build -c release --product omertad --product omerta
 
 echo ""
 echo "=== Installing Binaries ==="
-sudo cp .build/release/omerta-stun /opt/omerta/
 sudo cp .build/release/omertad /opt/omerta/
 sudo cp .build/release/omerta /opt/omerta/
 sudo chown omerta:omerta /opt/omerta/*
@@ -164,15 +163,12 @@ sudo ln -sf /opt/omerta/omerta /usr/local/bin/omerta
 
 echo ""
 echo "=== Restarting Services ==="
-sudo systemctl restart omerta-stun
 sudo systemctl restart omertad
 
 sleep 3
 
 echo ""
 echo "=== Service Status ==="
-sudo systemctl status omerta-stun --no-pager | head -10
-echo ""
 sudo systemctl status omertad --no-pager | head -10
 
 echo ""
@@ -202,35 +198,29 @@ if [ -n "$OTHER_IP" ]; then
 
     # Download from build server
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-        "omerta@$BUILD_IP:/opt/omerta/omerta-stun" \
         "omerta@$BUILD_IP:/opt/omerta/omertad" \
         "omerta@$BUILD_IP:/opt/omerta/omerta" \
         "$TEMP_DIR/"
 
     # Upload to other server
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
-        "$TEMP_DIR/omerta-stun" \
         "$TEMP_DIR/omertad" \
         "$TEMP_DIR/omerta" \
         "omerta@$OTHER_IP:/tmp/"
 
     # Install and restart on other server
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$OTHER_IP" << 'REMOTE'
-        sudo mv /tmp/omerta-stun /opt/omerta/
         sudo mv /tmp/omertad /opt/omerta/
         sudo mv /tmp/omerta /opt/omerta/
         sudo chown omerta:omerta /opt/omerta/*
         sudo chmod +x /opt/omerta/*
         sudo ln -sf /opt/omerta/omerta /usr/local/bin/omerta
 
-        sudo systemctl restart omerta-stun
         sudo systemctl restart omertad
 
         sleep 2
 
         echo "Service status:"
-        sudo systemctl status omerta-stun --no-pager | head -5
-        echo ""
         sudo systemctl status omertad --no-pager | head -5
 REMOTE
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build omerta-stun, omertad, and omerta CLI binaries for deployment
+# Build omertad and omerta CLI binaries for deployment
 #
 # This script supports three build modes:
 # 1. Local build (default) - uses Swift on your local machine
@@ -75,7 +75,7 @@ fi
 mkdir -p "$BUILD_DIR"
 
 # Determine build flags
-BUILD_FLAGS="-c release --product omerta-stun --product omertad --product omerta"
+BUILD_FLAGS="-c release --product omertad --product omerta"
 if $USE_STATIC; then
     BUILD_FLAGS="$BUILD_FLAGS --static-swift-stdlib"
 fi
@@ -102,13 +102,11 @@ if $USE_ARCH_HOME; then
     echo "Building on arch-home..."
     ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta"
     ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omertad"
-    ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta-stun"
 
     # Copy binaries back
     echo "Copying binaries from arch-home..."
     scp arch-home:~/omerta-build/.build/release/omerta \
         arch-home:~/omerta-build/.build/release/omertad \
-        arch-home:~/omerta-build/.build/release/omerta-stun \
         "$BUILD_DIR/"
 
     # Skip the normal copy step
@@ -177,7 +175,7 @@ else
     swift build $BUILD_FLAGS
 
     # Get bin path
-    BIN_PATH=$(swift build -c release --product omerta-stun --show-bin-path)
+    BIN_PATH=$(swift build -c release --product omertad --show-bin-path)
 fi
 
 # Copy binaries to build directory (skip if arch-home already copied them)
@@ -185,7 +183,7 @@ if [ -n "$BIN_PATH" ]; then
     echo ""
     echo "Copying binaries..."
 
-    for binary in omerta-stun omertad omerta; do
+    for binary in omertad omerta; do
         if [ -f "$BIN_PATH/$binary" ]; then
             cp "$BIN_PATH/$binary" "$BUILD_DIR/$binary"
             echo "  $binary -> $BUILD_DIR/$binary"
@@ -200,7 +198,7 @@ echo ""
 echo "=== Build Complete ==="
 echo ""
 echo "Binaries:"
-ls -lh "$BUILD_DIR/omerta-stun" "$BUILD_DIR/omertad" "$BUILD_DIR/omerta"
+ls -lh "$BUILD_DIR/omertad" "$BUILD_DIR/omerta"
 echo ""
 echo "Binary info:"
 file "$BUILD_DIR/omerta"
