@@ -114,6 +114,113 @@ chmod +x /etc/profile.d/swift.sh
 # Install CloudWatch agent for disk and process monitoring
 dnf install -y amazon-cloudwatch-agent
 
+# Install and configure fail2ban for SSH protection
+dnf install -y fail2ban
+cat > /etc/fail2ban/jail.local <<'FAIL2BAN'
+[DEFAULT]
+# Aggressive settings - ban for 24h after 3 attempts in 10 min
+bantime = 24h
+findtime = 10m
+maxretry = 3
+# Increase ban time for repeat offenders
+bantime.increment = true
+bantime.factor = 24
+bantime.maxtime = 1w
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 24h
+FAIL2BAN
+
+# Block known malicious IP ranges (data centers commonly used for attacks)
+# These are hosting/VPS providers frequently used for SSH brute force
+cat > /etc/fail2ban/jail.d/blocklist.conf <<'BLOCKLIST'
+[DEFAULT]
+# Known malicious ranges will be blocked via iptables below
+BLOCKLIST
+
+# Block suspicious IP ranges via iptables
+# Common attack sources: certain hosting providers, Tor exit nodes, etc.
+cat > /usr/local/bin/block-suspicious-ranges.sh <<'BLOCKSCRIPT'
+#!/bin/bash
+# Block known attack source ranges
+# These are hosting/VPS providers commonly used for SSH attacks
+
+# Create ipset for efficient blocking (if not exists)
+if ! ipset list blocked_ranges &>/dev/null; then
+    ipset create blocked_ranges hash:net
+fi
+
+# Known malicious/suspicious ranges (hosting providers used for attacks)
+# DigitalOcean scanner ranges (not blocking all DO, just known bad)
+ipset add blocked_ranges 104.248.0.0/16 -exist
+ipset add blocked_ranges 134.209.0.0/16 -exist
+ipset add blocked_ranges 157.245.0.0/16 -exist
+ipset add blocked_ranges 165.227.0.0/16 -exist
+
+# Choopa/Vultr scanner ranges
+ipset add blocked_ranges 45.32.0.0/16 -exist
+ipset add blocked_ranges 45.63.0.0/16 -exist
+ipset add blocked_ranges 45.76.0.0/16 -exist
+ipset add blocked_ranges 45.77.0.0/16 -exist
+
+# Known Chinese attack ranges (adjust if you need China access)
+ipset add blocked_ranges 58.218.0.0/16 -exist
+ipset add blocked_ranges 58.242.0.0/16 -exist
+ipset add blocked_ranges 61.177.0.0/16 -exist
+ipset add blocked_ranges 222.186.0.0/16 -exist
+
+# Russian attack ranges (adjust if you need Russia access)
+ipset add blocked_ranges 5.188.0.0/16 -exist
+ipset add blocked_ranges 193.106.0.0/16 -exist
+
+# Apply iptables rules - allow only STUN and omertad from blocked ranges, drop everything else
+# Rules are evaluated in order, so ACCEPT rules must come before DROP
+
+# Allow STUN (UDP 3478) from blocked ranges
+if ! iptables -C INPUT -p udp --dport 3478 -m set --match-set blocked_ranges src -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT -p udp --dport 3478 -m set --match-set blocked_ranges src -j ACCEPT
+fi
+
+# Allow omertad (UDP 9999) from blocked ranges
+if ! iptables -C INPUT -p udp --dport 9999 -m set --match-set blocked_ranges src -j ACCEPT 2>/dev/null; then
+    iptables -I INPUT -p udp --dport 9999 -m set --match-set blocked_ranges src -j ACCEPT
+fi
+
+# Drop all other traffic from blocked ranges
+if ! iptables -C INPUT -m set --match-set blocked_ranges src -j DROP 2>/dev/null; then
+    iptables -A INPUT -m set --match-set blocked_ranges src -j DROP
+fi
+BLOCKSCRIPT
+chmod +x /usr/local/bin/block-suspicious-ranges.sh
+
+# Install ipset and apply blocks
+dnf install -y ipset
+/usr/local/bin/block-suspicious-ranges.sh
+
+# Make blocks persist across reboots
+cat > /etc/systemd/system/block-suspicious-ranges.service <<'SYSTEMD'
+[Unit]
+Description=Block suspicious IP ranges
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/block-suspicious-ranges.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD
+systemctl enable block-suspicious-ranges
+
+systemctl enable fail2ban
+systemctl start fail2ban
+
 # Create omerta user with home directory
 useradd -r -m -d /home/omerta -s /bin/bash omerta || true
 

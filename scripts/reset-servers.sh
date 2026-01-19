@@ -223,7 +223,7 @@ if ! $SKIP_DESTROY; then
         for ip in "$BOOTSTRAP1_IP" "$BOOTSTRAP2_IP"; do
             if [ -n "$ip" ]; then
                 log "    Waiting for $ip..."
-                until ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "omerta@$ip" "cloud-init status --wait" 2>/dev/null; do
+                until ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "omerta@$ip" "sudo cloud-init status --wait" 2>/dev/null; do
                     sleep 10
                 done
             fi

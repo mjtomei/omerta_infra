@@ -229,13 +229,12 @@ else
         exit 1
     fi
 
-    # Get bootstrap1's peer ID
-    BOOTSTRAP1_PEER_ID=$(get_from "$BOOTSTRAP1_IP" \
-        "/opt/omerta/omerta network show 2>/dev/null | grep -i 'peer.*id' | grep -o '[a-f0-9]\\{16\\}' | head -1")
+    # Get bootstrap1's peer ID from the creation output ("Your Peer ID: xxx")
+    BOOTSTRAP1_PEER_ID=$(echo "$CREATE_OUTPUT" | grep -i "Your Peer ID:" | grep -oE '[a-f0-9]{16}' | head -1)
 
     if [ -z "$BOOTSTRAP1_PEER_ID" ]; then
-        # Try to extract from the link or bootstrap list
-        BOOTSTRAP1_PEER_ID=$(echo "$INITIAL_LINK" | grep -o '[a-f0-9]\{16\}' | head -1)
+        # Fallback: try to extract from the bootstrap peer line in output
+        BOOTSTRAP1_PEER_ID=$(echo "$CREATE_OUTPUT" | grep -oE '[a-f0-9]{16}@' | head -1 | tr -d '@')
     fi
 fi
 
@@ -256,9 +255,13 @@ else
 
     echo "$JOIN_OUTPUT"
 
-    # Get bootstrap2's peer ID
-    BOOTSTRAP2_PEER_ID=$(get_from "$BOOTSTRAP2_IP" \
-        "/opt/omerta/omerta network show 2>/dev/null | grep -i 'peer.*id' | grep -o '[a-f0-9]\\{16\\}' | head -1")
+    # Get bootstrap2's peer ID from the join output ("Your Peer ID: xxx")
+    BOOTSTRAP2_PEER_ID=$(echo "$JOIN_OUTPUT" | grep -i "Your Peer ID:" | grep -oE '[a-f0-9]{16}' | head -1)
+
+    if [ -z "$BOOTSTRAP2_PEER_ID" ]; then
+        # Fallback: try to extract from the bootstrap peer line or other output
+        BOOTSTRAP2_PEER_ID=$(echo "$JOIN_OUTPUT" | grep -oE '[a-f0-9]{16}@' | tail -1 | tr -d '@')
+    fi
 
     if [ -z "$BOOTSTRAP2_PEER_ID" ]; then
         log_error "Failed to get bootstrap2's peer ID"
