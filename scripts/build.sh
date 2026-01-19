@@ -1,11 +1,67 @@
 #!/bin/bash
-# Build omerta-stun and omertad binaries for deployment
+# Build omerta-stun, omertad, and omerta CLI binaries for deployment
+#
+# This script supports three build modes:
+# 1. Local build (default) - uses Swift on your local machine
+# 2. Docker build (--docker) - uses Amazon Linux 2023 container for x86_64 compatibility
+# 3. Remote build (--arch-home) - builds via Docker on arch-home x86_64 machine
+#
+# Use --arch-home when:
+# - Building on ARM machines (like Jetson) for x86_64 EC2 deployment
+# - Local Docker can't run x86_64 containers efficiently
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 OMERTA_DIR="$ROOT_DIR/omerta"
 BUILD_DIR="$ROOT_DIR/build"
+
+usage() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Build omerta binaries for deployment."
+    echo ""
+    echo "Options:"
+    echo "  --docker      Build in Amazon Linux 2023 Docker container (local x86_64)"
+    echo "  --arch-home   Build via Docker on arch-home (for ARM hosts)"
+    echo "  --static      Use static Swift stdlib linking (larger binaries, more portable)"
+    echo "  -h, --help    Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  $0                    # Local build using system Swift"
+    echo "  $0 --docker           # Build in Docker for EC2 compatibility"
+    echo "  $0 --arch-home        # Build on arch-home for ARM hosts"
+    echo "  $0 --docker --static  # Docker build with static linking"
+    exit 1
+}
+
+USE_DOCKER=false
+USE_ARCH_HOME=false
+USE_STATIC=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --docker)
+            USE_DOCKER=true
+            shift
+            ;;
+        --arch-home)
+            USE_ARCH_HOME=true
+            shift
+            ;;
+        --static)
+            USE_STATIC=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            ;;
+    esac
+done
 
 echo "=== Building Omerta Binaries ==="
 
@@ -18,46 +74,126 @@ fi
 # Create build directory
 mkdir -p "$BUILD_DIR"
 
-cd "$OMERTA_DIR"
-
-# Build all products
-echo "Building omerta-stun..."
-swift build -c release --product omerta-stun
-
-echo "Building omertad..."
-swift build -c release --product omertad
-
-echo "Building omerta CLI..."
-swift build -c release --product omerta
-
-# Get bin path
-BIN_PATH=$(swift build -c release --product omerta-stun --show-bin-path)
-
-# Copy binaries to build directory
-echo "Copying binaries..."
-
-if [ -f "$BIN_PATH/omerta-stun" ]; then
-    cp "$BIN_PATH/omerta-stun" "$BUILD_DIR/omerta-stun"
-    echo "  omerta-stun -> $BUILD_DIR/omerta-stun"
-else
-    echo "Error: omerta-stun binary not found"
-    exit 1
+# Determine build flags
+BUILD_FLAGS="-c release --product omerta-stun --product omertad --product omerta"
+if $USE_STATIC; then
+    BUILD_FLAGS="$BUILD_FLAGS --static-swift-stdlib"
 fi
 
-if [ -f "$BIN_PATH/omertad" ]; then
-    cp "$BIN_PATH/omertad" "$BUILD_DIR/omertad"
-    echo "  omertad -> $BUILD_DIR/omertad"
+if $USE_ARCH_HOME; then
+    echo "Building on arch-home via Docker (Amazon Linux 2023 + Swift 6.0.3)..."
+    echo ""
+
+    # Check arch-home is reachable
+    if ! ssh -o ConnectTimeout=5 arch-home 'echo ok' >/dev/null 2>&1; then
+        echo "Error: Cannot connect to arch-home. Check SSH config."
+        exit 1
+    fi
+
+    # Sync code to arch-home
+    echo "Syncing code to arch-home..."
+    rsync -az --delete --exclude='.git' --exclude='.build' "$OMERTA_DIR/" arch-home:~/omerta-build/
+
+    # Clean build cache to avoid stale incremental builds
+    echo "Cleaning build cache..."
+    ssh arch-home "docker run --rm -v ~/omerta-build:/build omerta-builder rm -rf /build/.build" 2>/dev/null || true
+
+    # Build each product separately (multi-product builds can have caching issues)
+    echo "Building on arch-home..."
+    ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta"
+    ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omertad"
+    ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta-stun"
+
+    # Copy binaries back
+    echo "Copying binaries from arch-home..."
+    scp arch-home:~/omerta-build/.build/release/omerta \
+        arch-home:~/omerta-build/.build/release/omertad \
+        arch-home:~/omerta-build/.build/release/omerta-stun \
+        "$BUILD_DIR/"
+
+    # Skip the normal copy step
+    BIN_PATH=""
+
+elif $USE_DOCKER; then
+    echo "Building in Docker container (Amazon Linux 2023 + Swift 6.0.3)..."
+    echo ""
+
+    # Check if Docker image exists, build if not
+    if ! docker image inspect omerta-builder >/dev/null 2>&1; then
+        echo "Building Docker image (first time only)..."
+
+        # Create Dockerfile
+        cat > "$OMERTA_DIR/Dockerfile" << 'DOCKERFILE'
+FROM amazonlinux:2023
+
+# Install build dependencies
+RUN dnf install -y \
+    git \
+    gcc-c++ \
+    libcurl-devel \
+    libuuid-devel \
+    libxml2-devel \
+    ncurses-devel \
+    sqlite-devel \
+    python3 \
+    tar \
+    gzip \
+    && dnf clean all
+
+# Install Swift 6.0.3
+RUN cd /tmp && \
+    curl -sL "https://download.swift.org/swift-6.0.3-release/amazonlinux2/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-amazonlinux2.tar.gz" -o swift.tar.gz && \
+    mkdir -p /opt/swift && \
+    tar -xzf swift.tar.gz -C /opt/swift --strip-components=1 && \
+    rm swift.tar.gz
+
+ENV PATH="/opt/swift/usr/bin:${PATH}"
+
+WORKDIR /build
+DOCKERFILE
+
+        # Create .dockerignore
+        echo ".build" > "$OMERTA_DIR/.dockerignore"
+
+        docker build -t omerta-builder "$OMERTA_DIR/"
+        rm "$OMERTA_DIR/Dockerfile"
+    fi
+
+    # Run build in container
+    docker run --rm \
+        -v "$OMERTA_DIR:/build" \
+        omerta-builder \
+        bash -c "swift build $BUILD_FLAGS"
+
+    # Get bin path and copy binaries
+    BIN_PATH="$OMERTA_DIR/.build/release"
 else
-    echo "Error: omertad binary not found"
-    exit 1
+    echo "Building locally..."
+    echo ""
+
+    cd "$OMERTA_DIR"
+
+    # Build all products
+    swift build $BUILD_FLAGS
+
+    # Get bin path
+    BIN_PATH=$(swift build -c release --product omerta-stun --show-bin-path)
 fi
 
-if [ -f "$BIN_PATH/omerta" ]; then
-    cp "$BIN_PATH/omerta" "$BUILD_DIR/omerta"
-    echo "  omerta -> $BUILD_DIR/omerta"
-else
-    echo "Error: omerta binary not found"
-    exit 1
+# Copy binaries to build directory (skip if arch-home already copied them)
+if [ -n "$BIN_PATH" ]; then
+    echo ""
+    echo "Copying binaries..."
+
+    for binary in omerta-stun omertad omerta; do
+        if [ -f "$BIN_PATH/$binary" ]; then
+            cp "$BIN_PATH/$binary" "$BUILD_DIR/$binary"
+            echo "  $binary -> $BUILD_DIR/$binary"
+        else
+            echo "Error: $binary binary not found at $BIN_PATH/$binary"
+            exit 1
+        fi
+    done
 fi
 
 echo ""
@@ -65,5 +201,8 @@ echo "=== Build Complete ==="
 echo ""
 echo "Binaries:"
 ls -lh "$BUILD_DIR/omerta-stun" "$BUILD_DIR/omertad" "$BUILD_DIR/omerta"
+echo ""
+echo "Binary info:"
+file "$BUILD_DIR/omerta"
 echo ""
 echo "To deploy: ./scripts/deploy.sh prod all"

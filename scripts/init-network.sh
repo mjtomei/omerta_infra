@@ -21,6 +21,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 NETWORK_NAME="omerta-main"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/omerta-key.pem}"
 
 usage() {
     echo "Usage: $0 <environment> [options]"
@@ -118,10 +119,26 @@ if [ -z "$BOOTSTRAP1_IP" ] || [ -z "$BOOTSTRAP2_IP" ]; then
     exit 1
 fi
 
-# Get domain names from terraform outputs or construct them
+# Use IPs or domain names for endpoints
+# Set USE_IPS=true to use IP addresses (for when DNS isn't ready)
+USE_IPS="${USE_IPS:-false}"
+
 DOMAIN=$(terraform output -raw domain_name 2>/dev/null || echo "omerta.run")
-BOOTSTRAP1_DOMAIN="bootstrap1.${DOMAIN}"
-BOOTSTRAP2_DOMAIN="bootstrap2.${DOMAIN}"
+
+# Determine DNS prefix based on environment
+if [ "$ENVIRONMENT" = "staging" ]; then
+    DNS_PREFIX="staging-"
+else
+    DNS_PREFIX=""
+fi
+
+if [ "$USE_IPS" = "true" ]; then
+    BOOTSTRAP1_ENDPOINT="$BOOTSTRAP1_IP"
+    BOOTSTRAP2_ENDPOINT="$BOOTSTRAP2_IP"
+else
+    BOOTSTRAP1_ENDPOINT="${DNS_PREFIX}bootstrap1.${DOMAIN}"
+    BOOTSTRAP2_ENDPOINT="${DNS_PREFIX}bootstrap2.${DOMAIN}"
+fi
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════╗"
@@ -130,8 +147,8 @@ echo "╚═══════════════════════�
 echo ""
 echo "Network name:  $NETWORK_NAME"
 echo "Environment:   $ENVIRONMENT"
-echo "Bootstrap1:    $BOOTSTRAP1_DOMAIN ($BOOTSTRAP1_IP)"
-echo "Bootstrap2:    $BOOTSTRAP2_DOMAIN ($BOOTSTRAP2_IP)"
+echo "Bootstrap1:    $BOOTSTRAP1_ENDPOINT ($BOOTSTRAP1_IP)"
+echo "Bootstrap2:    $BOOTSTRAP2_ENDPOINT ($BOOTSTRAP2_IP)"
 echo ""
 
 if $DRY_RUN; then
@@ -151,7 +168,7 @@ run_on() {
         return 0
     fi
 
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "ec2-user@$ip" \
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "omerta@$ip" \
         "sudo -u omerta bash -c '$cmd'"
 }
 
@@ -161,7 +178,7 @@ get_from() {
     shift
     local cmd="$@"
 
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "ec2-user@$ip" \
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "omerta@$ip" \
         "sudo -u omerta bash -c '$cmd'" 2>/dev/null
 }
 
@@ -194,13 +211,13 @@ fi
 log "Step 1: Creating network on bootstrap1..."
 
 if $DRY_RUN; then
-    echo "  Would run: omerta network create --name $NETWORK_NAME --endpoint $BOOTSTRAP1_DOMAIN:9999"
+    echo "  Would run: omerta network create --name $NETWORK_NAME --endpoint $BOOTSTRAP1_ENDPOINT:9999"
     INITIAL_LINK="omerta://join/dry-run-link"
     BOOTSTRAP1_PEER_ID="dry-run-peer-id-1"
 else
     # Create network and capture output
     CREATE_OUTPUT=$(run_on "$BOOTSTRAP1_IP" "bootstrap1" \
-        "/opt/omerta/omerta network create --name '$NETWORK_NAME' --endpoint '$BOOTSTRAP1_DOMAIN:9999' 2>&1")
+        "/opt/omerta/omerta network create --name '$NETWORK_NAME' --endpoint '$BOOTSTRAP1_ENDPOINT:9999' 2>&1")
 
     echo "$CREATE_OUTPUT"
 
@@ -231,11 +248,11 @@ echo ""
 log "Step 2: Joining network on bootstrap2..."
 
 if $DRY_RUN; then
-    echo "  Would run: omerta network join '$INITIAL_LINK'"
+    echo "  Would run: omerta network join --key '$INITIAL_LINK'"
     BOOTSTRAP2_PEER_ID="dry-run-peer-id-2"
 else
     JOIN_OUTPUT=$(run_on "$BOOTSTRAP2_IP" "bootstrap2" \
-        "/opt/omerta/omerta network join '$INITIAL_LINK' 2>&1")
+        "/opt/omerta/omerta network join --key '$INITIAL_LINK' 2>&1")
 
     echo "$JOIN_OUTPUT"
 
@@ -253,51 +270,76 @@ log_success "Bootstrap2 joined the network"
 echo "  Bootstrap2 peer ID: $BOOTSTRAP2_PEER_ID"
 echo ""
 
-# Step 3: Add bootstrap2 as a bootstrap peer on both nodes
-BOOTSTRAP2_PEER="$BOOTSTRAP2_PEER_ID@$BOOTSTRAP2_DOMAIN:9999"
+# Step 3: Add both bootstrap peers on both nodes for symmetry
+BOOTSTRAP1_PEER="$BOOTSTRAP1_PEER_ID@$BOOTSTRAP1_ENDPOINT:9999"
+BOOTSTRAP2_PEER="$BOOTSTRAP2_PEER_ID@$BOOTSTRAP2_ENDPOINT:9999"
 
-log "Step 3: Adding bootstrap2 as bootstrap peer on both nodes..."
+log "Step 3: Adding bootstrap peers on both nodes..."
 
 if $DRY_RUN; then
     echo "  [bootstrap1] Would run: omerta network bootstrap add '$BOOTSTRAP2_PEER'"
+    echo "  [bootstrap2] Would run: omerta network bootstrap add '$BOOTSTRAP1_PEER'"
     echo "  [bootstrap2] Would run: omerta network bootstrap add '$BOOTSTRAP2_PEER'"
 else
-    # Add on bootstrap1
-    run_on "$BOOTSTRAP1_IP" "bootstrap1" \
-        "/opt/omerta/omerta network bootstrap add '$BOOTSTRAP2_PEER'" || true
-
-    # Add on bootstrap2
-    run_on "$BOOTSTRAP2_IP" "bootstrap2" \
-        "/opt/omerta/omerta network bootstrap add '$BOOTSTRAP2_PEER'" || true
-fi
-
-log_success "Bootstrap2 added as bootstrap peer"
-echo ""
-
-# Step 4: Update omertad config with network ID on both nodes
-log "Step 4: Configuring omertad with network ID..."
-
-if ! $DRY_RUN; then
-    # Get network ID
+    # Get network ID for --network flag
     NETWORK_ID=$(get_from "$BOOTSTRAP1_IP" \
         "/opt/omerta/omerta network list 2>/dev/null | grep -o '[a-f0-9]\\{16\\}' | head -1")
+
+    # Add bootstrap2 on bootstrap1
+    run_on "$BOOTSTRAP1_IP" "bootstrap1" \
+        "/opt/omerta/omerta network bootstrap add '$BOOTSTRAP2_PEER' --network '$NETWORK_ID'" || true
+
+    # Add both peers on bootstrap2 (it may not have bootstrap1 as a peer yet)
+    run_on "$BOOTSTRAP2_IP" "bootstrap2" \
+        "/opt/omerta/omerta network bootstrap add '$BOOTSTRAP1_PEER' --network '$NETWORK_ID'" || true
+    run_on "$BOOTSTRAP2_IP" "bootstrap2" \
+        "/opt/omerta/omerta network bootstrap add '$BOOTSTRAP2_PEER' --network '$NETWORK_ID'" || true
+fi
+
+log_success "Bootstrap peers configured on both nodes"
+echo ""
+
+# Step 4: Update omertad systemd service with network ID on both nodes
+log "Step 4: Configuring omertad service with network ID..."
+
+if ! $DRY_RUN; then
+    # Network ID should already be set from Step 3, but get it again if needed
+    if [ -z "$NETWORK_ID" ]; then
+        NETWORK_ID=$(get_from "$BOOTSTRAP1_IP" \
+            "/opt/omerta/omerta network list 2>/dev/null | grep -o '[a-f0-9]\\{16\\}' | head -1")
+    fi
 
     if [ -n "$NETWORK_ID" ]; then
         for server_info in "bootstrap1:$BOOTSTRAP1_IP" "bootstrap2:$BOOTSTRAP2_IP"; do
             name="${server_info%%:*}"
             ip="${server_info##*:}"
 
-            log "  Updating omertad.conf on $name..."
-            ssh -o StrictHostKeyChecking=no "ec2-user@$ip" << REMOTE
-                # Check if network= line exists
-                if grep -q "^network=" /home/omerta/.omerta/omertad.conf 2>/dev/null; then
-                    sudo -u omerta sed -i "s/^network=.*/network=$NETWORK_ID/" /home/omerta/.omerta/omertad.conf
-                else
-                    echo "network=$NETWORK_ID" | sudo -u omerta tee -a /home/omerta/.omerta/omertad.conf > /dev/null
-                fi
+            log "  Updating omertad.service on $name..."
+            ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$ip" << REMOTE
+                # Update systemd service to use --network flag directly (not --config)
+                sudo tee /etc/systemd/system/omertad.service << 'SERVICE'
+[Unit]
+Description=Omerta Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=omerta
+Group=omerta
+WorkingDirectory=/home/omerta
+ExecStart=/opt/omerta/omertad start --network $NETWORK_ID --port 9999
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/omerta/omertad.log
+StandardError=append:/var/log/omerta/omertad.log
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+                sudo systemctl daemon-reload
 REMOTE
         done
-        log_success "omertad configured with network ID: $NETWORK_ID"
+        log_success "omertad service configured with network ID: $NETWORK_ID"
     else
         log_warn "Could not determine network ID - manual config may be needed"
     fi
@@ -314,7 +356,7 @@ if ! $DRY_RUN; then
         ip="${server_info##*:}"
 
         log "  Restarting omertad on $name..."
-        ssh -o StrictHostKeyChecking=no "ec2-user@$ip" \
+        ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$ip" \
             "sudo systemctl restart omertad" || true
     done
 
@@ -345,8 +387,8 @@ if [ -n "$NETWORK_ID" ]; then
 fi
 echo ""
 echo "Bootstrap peers:"
-echo "  1. ${BOOTSTRAP1_PEER_ID:-unknown}@$BOOTSTRAP1_DOMAIN:9999"
-echo "  2. ${BOOTSTRAP2_PEER_ID:-unknown}@$BOOTSTRAP2_DOMAIN:9999"
+echo "  1. ${BOOTSTRAP1_PEER_ID:-unknown}@$BOOTSTRAP1_ENDPOINT:9999"
+echo "  2. ${BOOTSTRAP2_PEER_ID:-unknown}@$BOOTSTRAP2_ENDPOINT:9999"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "INVITE LINK (share with users to join the network):"

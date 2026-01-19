@@ -6,6 +6,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 OMERTA_DIR="$ROOT_DIR/omerta"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/omerta-key.pem}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,6 +27,8 @@ usage() {
     echo "  --server NAME     Update specific server only (bootstrap1, bootstrap2)"
     echo "  --skip-pull       Skip git submodule update (use existing code)"
     echo "  --skip-build      Skip build (use existing binaries)"
+    echo "  --arch-home       Build via Docker on arch-home (for ARM hosts)"
+    echo "  --docker          Build in local Docker container"
     echo "  --config          Also update omertad.conf from Terraform"
     echo "  --rolling         Rolling update (one server at a time, wait for health)"
     echo "  --dry-run         Show what would be done without doing it"
@@ -33,6 +36,7 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  $0 prod                      # Full update: pull, build, deploy all"
+    echo "  $0 prod --arch-home          # Build on arch-home (for ARM hosts)"
     echo "  $0 prod --rolling            # Rolling update for zero downtime"
     echo "  $0 prod --server bootstrap1  # Update bootstrap1 only"
     echo "  $0 prod --skip-pull          # Rebuild and deploy without pulling"
@@ -64,6 +68,7 @@ SKIP_BUILD=false
 UPDATE_CONFIG=false
 ROLLING=false
 DRY_RUN=false
+BUILD_FLAG=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -77,6 +82,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-build)
             SKIP_BUILD=true
+            shift
+            ;;
+        --arch-home)
+            BUILD_FLAG="--arch-home"
+            shift
+            ;;
+        --docker)
+            BUILD_FLAG="--docker"
             shift
             ;;
         --config)
@@ -127,13 +140,14 @@ echo "╔═══════════════════════�
 echo "║           Omerta Bootstrap Server Update                   ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
-echo "Environment:  $ENVIRONMENT"
-echo "Server:       $SERVER"
-echo "Skip pull:    $SKIP_PULL"
-echo "Skip build:   $SKIP_BUILD"
+echo "Environment:   $ENVIRONMENT"
+echo "Server:        $SERVER"
+echo "Skip pull:     $SKIP_PULL"
+echo "Skip build:    $SKIP_BUILD"
+echo "Build method:  ${BUILD_FLAG:-local}"
 echo "Update config: $UPDATE_CONFIG"
-echo "Rolling:      $ROLLING"
-echo "Dry run:      $DRY_RUN"
+echo "Rolling:       $ROLLING"
+echo "Dry run:       $DRY_RUN"
 echo ""
 
 if $DRY_RUN; then
@@ -167,11 +181,11 @@ fi
 
 # Step 2: Build binaries
 if ! $SKIP_BUILD; then
-    log "Building binaries..."
+    log "Building binaries${BUILD_FLAG:+ ($BUILD_FLAG)}..."
     if $DRY_RUN; then
-        echo "  Would run: ./scripts/build.sh"
+        echo "  Would run: ./scripts/build.sh $BUILD_FLAG"
     else
-        "$SCRIPT_DIR/build.sh"
+        "$SCRIPT_DIR/build.sh" $BUILD_FLAG
     fi
 else
     log "Skipping build (--skip-build)"
@@ -238,11 +252,11 @@ deploy_to_server() {
 
     # Upload binaries
     log "  Uploading binaries..."
-    scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
         "$BUILD_DIR/omerta-stun" \
         "$BUILD_DIR/omertad" \
         "$BUILD_DIR/omerta" \
-        "ec2-user@$ip:/tmp/"
+        "omerta@$ip:/tmp/"
 
     # Prepare config update command if needed
     CONFIG_CMD=""
@@ -275,7 +289,7 @@ CONF
     fi
 
     # Install and restart
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "ec2-user@$ip" << REMOTE
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "omerta@$ip" << REMOTE
         set -e
 
         # Install binaries
@@ -328,7 +342,7 @@ wait_for_health() {
     log "  Waiting for $name to be healthy..."
 
     while [ $attempt -le $max_attempts ]; do
-        if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "ec2-user@$ip" \
+        if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "omerta@$ip" \
             "sudo systemctl is-active --quiet omertad && sudo systemctl is-active --quiet omerta-stun" 2>/dev/null; then
             log_success "  $name is healthy"
             return 0
@@ -378,7 +392,7 @@ if ! $DRY_RUN; then
         ip="${server_info##*:}"
         echo ""
         echo "=== $name ($ip) ==="
-        ssh -o StrictHostKeyChecking=no "ec2-user@$ip" \
+        ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$ip" \
             "sudo systemctl status omerta-stun --no-pager -l 2>&1 | head -5; echo ''; sudo systemctl status omertad --no-pager -l 2>&1 | head -5" \
             2>/dev/null || echo "Could not get status"
     done

@@ -5,6 +5,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$ROOT_DIR/build"
+SSH_KEY="${SSH_KEY:-$HOME/.ssh/omerta-key.pem}"
 
 usage() {
     echo "Usage: $0 <environment> [server]"
@@ -62,15 +63,15 @@ deploy_to_server() {
 
     # Upload binaries
     echo "Uploading binaries..."
-    scp -o StrictHostKeyChecking=no \
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
         "$BUILD_DIR/omerta-stun" \
         "$BUILD_DIR/omertad" \
         "$BUILD_DIR/omerta" \
-        "ec2-user@$ip:/tmp/"
+        "omerta@$ip:/tmp/"
 
     # Install and restart services
     echo "Installing binaries and restarting services..."
-    ssh -o StrictHostKeyChecking=no "ec2-user@$ip" << 'REMOTE'
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "omerta@$ip" << 'REMOTE'
         # Install omerta-stun
         sudo mv /tmp/omerta-stun /opt/omerta/omerta-stun
         sudo chmod +x /opt/omerta/omerta-stun

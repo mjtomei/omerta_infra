@@ -90,13 +90,74 @@ terraform apply
 
 # 5. Build and deploy binaries
 cd ../../..
-./scripts/build.sh
+./scripts/build.sh --docker  # Use Docker for x86_64 EC2 compatibility
 ./scripts/deploy.sh prod all
 
 # 6. Initialize the omerta-main network
 ./scripts/init-network.sh prod
 
 # The invite link will be saved to network-link.txt
+```
+
+## Cross-Platform Building
+
+EC2 instances run Amazon Linux 2023 (x86_64). If you're building on a different platform (e.g., Apple Silicon Mac), use Docker to ensure binary compatibility.
+
+### Docker Build (Recommended for cross-platform)
+
+The `--docker` flag builds inside an Amazon Linux 2023 container with Swift 6.0.3:
+
+```bash
+./scripts/build.sh --docker
+```
+
+This automatically:
+1. Creates an `omerta-builder` Docker image (cached after first build)
+2. Builds binaries with matching glibc and Swift versions
+3. Outputs x86_64 binaries compatible with EC2
+
+### Remote Build on arch-home
+
+For faster builds, you can use the `arch-home` Intel Linux desktop:
+
+```bash
+# 1. Sync code to arch-home
+rsync -av --exclude='.git' --exclude='.build' omerta/ arch-home:~/omerta-build/
+
+# 2. Build with Docker on arch-home
+ssh arch-home 'cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta-stun --product omertad --product omerta'
+
+# 3. Copy binaries back
+scp arch-home:~/omerta-build/.build/release/omerta* build/
+
+# 4. Deploy
+./scripts/deploy.sh prod all
+```
+
+### Building the Docker Image
+
+The image is auto-created by `build.sh --docker`, but you can build it manually:
+
+```bash
+cd omerta
+cat > Dockerfile << 'EOF'
+FROM amazonlinux:2023
+
+RUN dnf install -y git gcc-c++ libcurl-devel libuuid-devel libxml2-devel \
+    ncurses-devel sqlite-devel python3 tar gzip && dnf clean all
+
+RUN cd /tmp && \
+    curl -sL "https://download.swift.org/swift-6.0.3-release/amazonlinux2/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-amazonlinux2.tar.gz" -o swift.tar.gz && \
+    mkdir -p /opt/swift && \
+    tar -xzf swift.tar.gz -C /opt/swift --strip-components=1 && \
+    rm swift.tar.gz
+
+ENV PATH="/opt/swift/usr/bin:${PATH}"
+WORKDIR /build
+EOF
+
+echo ".build" > .dockerignore
+docker build -t omerta-builder .
 ```
 
 ## Network Initialization
@@ -125,19 +186,26 @@ After `terraform apply`, you'll see Route53 nameservers in the output. Configure
 ```
 omerta-infra/
 ├── omerta/                          # Source code (submodule)
+├── build/                           # Built binaries (created by build.sh)
+│   ├── omerta                       # CLI binary
+│   ├── omertad                      # Daemon binary
+│   └── omerta-stun                  # STUN server binary
 ├── terraform/
-│   ├── modules/bootstrap/          # Reusable EC2 + security group
+│   ├── modules/bootstrap/           # Reusable EC2 + security group
 │   └── environments/prod/           # Production configuration
 ├── scripts/
-│   ├── build.sh                     # Build omerta-stun, omertad, omerta
+│   ├── build.sh                     # Build binaries (supports --docker)
 │   ├── deploy.sh                    # Deploy binaries to EC2
 │   ├── update.sh                    # Full update: pull, build, deploy
 │   ├── init-network.sh              # Initialize omerta-main network
+│   ├── copy-binaries.sh             # Copy binaries between servers
+│   ├── build-remote.sh              # Build on remote EC2 (legacy)
 │   └── setup-hooks.sh               # Configure git hooks
 ├── .githooks/
 │   └── pre-commit                   # Blocks credential commits
 ├── docs/
 │   └── setup.md                     # Detailed setup guide
+├── network-link.txt                 # Generated invite link (after init)
 ├── .env.example                     # Environment template
 └── README.md
 ```
@@ -159,12 +227,25 @@ omerta-infra/
 | 3478 | UDP | STUN server (omerta-stun) |
 | 9999 | UDP | Mesh network (omertad) |
 
+## Server Configuration
+
+EC2 instances are configured via Terraform user_data with:
+
+| Component | Version | Purpose |
+|-----------|---------|---------|
+| Amazon Linux 2023 | Latest | Base OS |
+| Swift | 6.0.3 | Runtime (if building on EC2) |
+| WireGuard Tools | System | VPN tunnel support for omertad |
+| CloudWatch Agent | System | Disk and process monitoring |
+
+The `omerta` user owns all binaries and runs services.
+
 ## Services
 
 | Service | Binary | Config | Description |
 |---------|--------|--------|-------------|
 | `omerta-stun` | `/opt/omerta/omerta-stun` | CLI flags | STUN server for NAT detection |
-| `omertad` | `/opt/omerta/omertad` | `/home/omerta/.omerta/omertad.conf` | Mesh daemon for peer discovery |
+| `omertad` | `/opt/omerta/omertad` | `--network <id> --port 9999` | Mesh daemon for peer discovery |
 
 **Managing omertad:**
 ```bash
@@ -184,11 +265,32 @@ sudo -u omerta /opt/omerta/omerta mesh peers
 
 ## Updating Servers
 
+### Quick Update (using arch-home Docker build)
+
+```bash
+# 1. Update submodule
+cd omerta && git pull && cd ..
+
+# 2. Sync to arch-home and build
+rsync -av --exclude='.git' --exclude='.build' omerta/ arch-home:~/omerta-build/
+ssh arch-home 'cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta-stun --product omertad --product omerta'
+
+# 3. Copy binaries and deploy
+mkdir -p build
+scp arch-home:~/omerta-build/.build/release/omerta* build/
+./scripts/deploy.sh prod all
+```
+
+### Using update.sh
+
 The `update.sh` script handles the full update workflow: pulling latest code, building, and deploying.
 
 ```bash
 # Full update: pull latest code, build, deploy to all servers
 ./scripts/update.sh prod
+
+# With Docker build (for cross-platform)
+./scripts/update.sh prod --docker
 
 # Rolling update (zero-downtime, one server at a time)
 ./scripts/update.sh prod --rolling
@@ -211,8 +313,8 @@ The `update.sh` script handles the full update workflow: pulling latest code, bu
 # Just pull submodule
 git submodule update --remote --merge
 
-# Just build
-./scripts/build.sh
+# Just build (with Docker for cross-platform)
+./scripts/build.sh --docker
 
 # Just deploy (requires prior build)
 ./scripts/deploy.sh prod all
