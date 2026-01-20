@@ -59,7 +59,8 @@ data "aws_subnets" "default" {
 
 # Associate an Amazon-provided IPv6 CIDR block with the VPC
 resource "aws_vpc_ipv6_cidr_block_association" "default" {
-  vpc_id = data.aws_vpc.default.id
+  vpc_id                          = data.aws_vpc.default.id
+  assign_generated_ipv6_cidr_block = true
 }
 
 # Get availability zones for subnet placement
@@ -68,12 +69,12 @@ data "aws_availability_zones" "available" {
 }
 
 # Create dedicated subnets for bootstrap servers with IPv6 support
-# Using 172.31.128.0/24 and 172.31.129.0/24 (outside the default 172.31.0.0/20 range)
+# Using 172.31.200.0/24 and 172.31.201.0/24 (in the unused 172.31.144-255 range)
 resource "aws_subnet" "bootstrap1" {
   vpc_id                          = data.aws_vpc.default.id
   availability_zone               = data.aws_availability_zones.available.names[0]
-  cidr_block                      = "172.31.128.0/24"
-  ipv6_cidr_block                 = cidrsubnet(aws_vpc_ipv6_cidr_block_association.default.ipv6_cidr_block, 8, 128)
+  cidr_block                      = "172.31.200.0/24"
+  ipv6_cidr_block                 = cidrsubnet(aws_vpc_ipv6_cidr_block_association.default.ipv6_cidr_block, 8, 200)
   assign_ipv6_address_on_creation = true
   map_public_ip_on_launch         = true
 
@@ -85,8 +86,8 @@ resource "aws_subnet" "bootstrap1" {
 resource "aws_subnet" "bootstrap2" {
   vpc_id                          = data.aws_vpc.default.id
   availability_zone               = length(data.aws_availability_zones.available.names) > 1 ? data.aws_availability_zones.available.names[1] : data.aws_availability_zones.available.names[0]
-  cidr_block                      = "172.31.129.0/24"
-  ipv6_cidr_block                 = cidrsubnet(aws_vpc_ipv6_cidr_block_association.default.ipv6_cidr_block, 8, 129)
+  cidr_block                      = "172.31.201.0/24"
+  ipv6_cidr_block                 = cidrsubnet(aws_vpc_ipv6_cidr_block_association.default.ipv6_cidr_block, 8, 201)
   assign_ipv6_address_on_creation = true
   map_public_ip_on_launch         = true
 
