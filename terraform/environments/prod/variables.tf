@@ -44,6 +44,12 @@ variable "ssh_cidr_blocks" {
   default     = []  # Empty default - should be set to your IP
 }
 
+variable "ssh_ipv6_cidr_blocks" {
+  description = "IPv6 CIDR blocks allowed for SSH access (set via TF_VAR_ssh_ipv6_cidr_blocks env var)"
+  type        = list(string)
+  default     = ["::/0"]  # Allow all IPv6 by default (SSH keys still required)
+}
+
 # =============================================================================
 # Cost Controls
 # =============================================================================

@@ -52,6 +52,74 @@ data "aws_subnets" "default" {
   }
 }
 
+# =============================================================================
+# IPv6 Configuration
+# =============================================================================
+# Add IPv6 support to the default VPC and create dedicated subnets for bootstrap servers
+
+# Associate an Amazon-provided IPv6 CIDR block with the VPC
+resource "aws_vpc_ipv6_cidr_block_association" "default" {
+  vpc_id = data.aws_vpc.default.id
+}
+
+# Get availability zones for subnet placement
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Create dedicated subnets for bootstrap servers with IPv6 support
+# Using 172.31.128.0/24 and 172.31.129.0/24 (outside the default 172.31.0.0/20 range)
+resource "aws_subnet" "bootstrap1" {
+  vpc_id                          = data.aws_vpc.default.id
+  availability_zone               = data.aws_availability_zones.available.names[0]
+  cidr_block                      = "172.31.128.0/24"
+  ipv6_cidr_block                 = cidrsubnet(aws_vpc_ipv6_cidr_block_association.default.ipv6_cidr_block, 8, 128)
+  assign_ipv6_address_on_creation = true
+  map_public_ip_on_launch         = true
+
+  tags = merge(local.common_tags, {
+    Name = "omerta-bootstrap1-subnet"
+  })
+}
+
+resource "aws_subnet" "bootstrap2" {
+  vpc_id                          = data.aws_vpc.default.id
+  availability_zone               = length(data.aws_availability_zones.available.names) > 1 ? data.aws_availability_zones.available.names[1] : data.aws_availability_zones.available.names[0]
+  cidr_block                      = "172.31.129.0/24"
+  ipv6_cidr_block                 = cidrsubnet(aws_vpc_ipv6_cidr_block_association.default.ipv6_cidr_block, 8, 129)
+  assign_ipv6_address_on_creation = true
+  map_public_ip_on_launch         = true
+
+  tags = merge(local.common_tags, {
+    Name = "omerta-bootstrap2-subnet"
+  })
+}
+
+# Add IPv6 route to internet gateway
+data "aws_internet_gateway" "default" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+resource "aws_route" "ipv6_default" {
+  route_table_id              = data.aws_vpc.default.main_route_table_id
+  destination_ipv6_cidr_block = "::/0"
+  gateway_id                  = data.aws_internet_gateway.default.id
+}
+
+# Associate subnets with the main route table for internet access
+resource "aws_route_table_association" "bootstrap1" {
+  subnet_id      = aws_subnet.bootstrap1.id
+  route_table_id = data.aws_vpc.default.main_route_table_id
+}
+
+resource "aws_route_table_association" "bootstrap2" {
+  subnet_id      = aws_subnet.bootstrap2.id
+  route_table_id = data.aws_vpc.default.main_route_table_id
+}
+
 # Latest Amazon Linux 2023 AMI
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
@@ -150,6 +218,10 @@ cat > /usr/local/bin/block-suspicious-ranges.sh <<'BLOCKSCRIPT'
 # Block known attack source ranges
 # These are hosting/VPS providers commonly used for SSH attacks
 
+# =============================================================================
+# IPv4 Blocking
+# =============================================================================
+
 # Create ipset for efficient blocking (if not exists)
 if ! ipset list blocked_ranges &>/dev/null; then
     ipset create blocked_ranges hash:net
@@ -189,6 +261,34 @@ fi
 # Drop all other traffic from blocked ranges
 if ! iptables -C INPUT -m set --match-set blocked_ranges src -j DROP 2>/dev/null; then
     iptables -A INPUT -m set --match-set blocked_ranges src -j DROP
+fi
+
+# =============================================================================
+# IPv6 Blocking
+# =============================================================================
+
+# Create ipset for IPv6 blocking (requires family inet6)
+if ! ipset list blocked_ranges_v6 &>/dev/null; then
+    ipset create blocked_ranges_v6 hash:net family inet6
+fi
+
+# DigitalOcean IPv6 ranges
+ipset add blocked_ranges_v6 2604:a880::/32 -exist
+ipset add blocked_ranges_v6 2400:6180::/32 -exist
+
+# Vultr/Choopa IPv6 ranges
+ipset add blocked_ranges_v6 2001:19f0::/32 -exist
+
+# Apply ip6tables rules - same logic as IPv4
+
+# Allow omertad (UDP 9999) from blocked IPv6 ranges
+if ! ip6tables -C INPUT -p udp --dport 9999 -m set --match-set blocked_ranges_v6 src -j ACCEPT 2>/dev/null; then
+    ip6tables -I INPUT -p udp --dport 9999 -m set --match-set blocked_ranges_v6 src -j ACCEPT
+fi
+
+# Drop all other traffic from blocked IPv6 ranges
+if ! ip6tables -C INPUT -m set --match-set blocked_ranges_v6 src -j DROP 2>/dev/null; then
+    ip6tables -A INPUT -m set --match-set blocked_ranges_v6 src -j DROP
 fi
 BLOCKSCRIPT
 chmod +x /usr/local/bin/block-suspicious-ranges.sh
@@ -338,21 +438,25 @@ module "bootstrap1" {
 
   name          = "omerta-bootstrap1-prod"
   vpc_id        = data.aws_vpc.default.id
-  subnet_id     = data.aws_subnets.default.ids[0]
+  subnet_id     = aws_subnet.bootstrap1.id
   ami_id        = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
   key_name      = var.key_name
   volume_size   = 30
   create_eip    = true
   user_data     = local.user_data
+  enable_ipv6   = true
 
-  ssh_cidr_blocks = var.ssh_cidr_blocks
+  ssh_cidr_blocks      = var.ssh_cidr_blocks
+  ssh_ipv6_cidr_blocks = var.ssh_ipv6_cidr_blocks
 
   tags = merge(local.common_tags, {
     Service = "bootstrap"
     Domain  = "bootstrap1.omerta.run"
     Backup  = "true"
   })
+
+  depends_on = [aws_subnet.bootstrap1]
 }
 
 # Secondary bootstrap server (different AZ for redundancy)
@@ -361,21 +465,25 @@ module "bootstrap2" {
 
   name          = "omerta-bootstrap2-prod"
   vpc_id        = data.aws_vpc.default.id
-  subnet_id     = length(data.aws_subnets.default.ids) > 1 ? data.aws_subnets.default.ids[1] : data.aws_subnets.default.ids[0]
+  subnet_id     = aws_subnet.bootstrap2.id
   ami_id        = data.aws_ami.amazon_linux_2023.id
   instance_type = var.instance_type
   key_name      = var.key_name
   volume_size   = 30
   create_eip    = true
   user_data     = local.user_data
+  enable_ipv6   = true
 
-  ssh_cidr_blocks = var.ssh_cidr_blocks
+  ssh_cidr_blocks      = var.ssh_cidr_blocks
+  ssh_ipv6_cidr_blocks = var.ssh_ipv6_cidr_blocks
 
   tags = merge(local.common_tags, {
     Service = "bootstrap"
     Domain  = "bootstrap2.omerta.run"
     Backup  = "true"
   })
+
+  depends_on = [aws_subnet.bootstrap2]
 }
 
 # =============================================================================
@@ -407,6 +515,24 @@ resource "aws_route53_record" "bootstrap2" {
   type    = "A"
   ttl     = 300
   records = [module.bootstrap2.public_ip]
+}
+
+# IPv6 AAAA records for bootstrap servers
+# Always created since enable_ipv6 = true for both modules
+resource "aws_route53_record" "bootstrap1_ipv6" {
+  zone_id = aws_route53_zone.omerta.zone_id
+  name    = "bootstrap1.${var.domain_name}"
+  type    = "AAAA"
+  ttl     = 300
+  records = [module.bootstrap1.ipv6_address]
+}
+
+resource "aws_route53_record" "bootstrap2_ipv6" {
+  zone_id = aws_route53_zone.omerta.zone_id
+  name    = "bootstrap2.${var.domain_name}"
+  type    = "AAAA"
+  ttl     = 300
+  records = [module.bootstrap2.ipv6_address]
 }
 
 # =============================================================================

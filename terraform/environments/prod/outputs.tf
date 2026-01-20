@@ -12,6 +12,16 @@ output "bootstrap2_public_ip" {
   value       = module.bootstrap2.public_ip
 }
 
+output "bootstrap1_ipv6_address" {
+  description = "IPv6 address for bootstrap1.omerta.run"
+  value       = module.bootstrap1.ipv6_address
+}
+
+output "bootstrap2_ipv6_address" {
+  description = "IPv6 address for bootstrap2.omerta.run"
+  value       = module.bootstrap2.ipv6_address
+}
+
 output "bootstrap1_endpoints" {
   description = "All endpoints for bootstrap1"
   value = {
@@ -52,8 +62,10 @@ output "route53_nameservers" {
 output "dns_records_created" {
   description = "DNS records managed by Terraform"
   value = {
-    "bootstrap1.${var.domain_name}" = module.bootstrap1.public_ip
-    "bootstrap2.${var.domain_name}" = module.bootstrap2.public_ip
+    "bootstrap1.${var.domain_name} (A)"    = module.bootstrap1.public_ip
+    "bootstrap2.${var.domain_name} (A)"    = module.bootstrap2.public_ip
+    "bootstrap1.${var.domain_name} (AAAA)" = module.bootstrap1.ipv6_address
+    "bootstrap2.${var.domain_name} (AAAA)" = module.bootstrap2.ipv6_address
   }
 }
 

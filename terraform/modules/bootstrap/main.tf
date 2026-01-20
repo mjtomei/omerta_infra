@@ -48,30 +48,56 @@ resource "aws_security_group" "bootstrap" {
   description = "Security group for Omerta Mesh servers"
   vpc_id      = var.vpc_id
 
-  # SSH access
+  # SSH access (IPv4)
   ingress {
-    description = "SSH"
+    description = "SSH IPv4"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = var.ssh_cidr_blocks
   }
 
-  # Omertad mesh network (UDP)
+  # SSH access (IPv6)
   ingress {
-    description = "Omertad Mesh"
+    description      = "SSH IPv6"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    ipv6_cidr_blocks = var.ssh_ipv6_cidr_blocks
+  }
+
+  # Omertad mesh network (UDP IPv4)
+  ingress {
+    description = "Omertad Mesh IPv4"
     from_port   = 9999
     to_port     = 9999
     protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow all outbound
+  # Omertad mesh network (UDP IPv6)
+  ingress {
+    description      = "Omertad Mesh IPv6"
+    from_port        = 9999
+    to_port          = 9999
+    protocol         = "udp"
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  # Allow all outbound (IPv4)
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow all outbound (IPv6)
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    ipv6_cidr_blocks = ["::/0"]
   }
 
   tags = merge(var.tags, {
@@ -87,6 +113,9 @@ resource "aws_instance" "bootstrap" {
   vpc_security_group_ids = [aws_security_group.bootstrap.id]
   subnet_id              = var.subnet_id
   iam_instance_profile   = aws_iam_instance_profile.instance.name
+
+  # Request one IPv6 address if the subnet supports it
+  ipv6_address_count = var.enable_ipv6 ? 1 : 0
 
   root_block_device {
     volume_size = var.volume_size

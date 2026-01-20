@@ -9,8 +9,13 @@ output "private_ip" {
 }
 
 output "public_ip" {
-  description = "Public IP address (EIP if created, otherwise instance public IP)"
+  description = "Public IPv4 address (EIP if created, otherwise instance public IP)"
   value       = var.create_eip ? aws_eip.bootstrap[0].public_ip : aws_instance.bootstrap.public_ip
+}
+
+output "ipv6_address" {
+  description = "Public IPv6 address (if enabled)"
+  value       = length(aws_instance.bootstrap.ipv6_addresses) > 0 ? aws_instance.bootstrap.ipv6_addresses[0] : null
 }
 
 output "security_group_id" {

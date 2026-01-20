@@ -36,9 +36,21 @@ variable "volume_size" {
 }
 
 variable "ssh_cidr_blocks" {
-  description = "CIDR blocks allowed for SSH access"
+  description = "IPv4 CIDR blocks allowed for SSH access"
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "ssh_ipv6_cidr_blocks" {
+  description = "IPv6 CIDR blocks allowed for SSH access"
+  type        = list(string)
+  default     = ["::/0"]
+}
+
+variable "enable_ipv6" {
+  description = "Whether to enable IPv6 on the instance (requires IPv6-enabled subnet)"
+  type        = bool
+  default     = false
 }
 
 variable "create_eip" {
