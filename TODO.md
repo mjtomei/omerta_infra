@@ -37,4 +37,4 @@ Long-term: SQLite database with proper schema
 ### Peer ID Security Fix
 The CLI `--peer-id` flag allows arbitrary peer IDs disconnected from cryptographic identity. This should be fixed so peer IDs are derived from public keys (like OmertaCore does) to prevent impersonation.
 
-See: `/home/matt/omerta/Sources/OmertaMesh/MeshNode.swift` lines 163-166
+See: `omerta_mesh/Sources/OmertaMesh/MeshNode.swift` lines 163-166
