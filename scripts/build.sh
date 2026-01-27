@@ -74,6 +74,21 @@ fi
 # Create build directory
 mkdir -p "$BUILD_DIR"
 
+# Build netstack Go library if needed
+NETSTACK_DIR="$OMERTA_DIR/omerta_mesh/Sources/OmertaTunnel/Netstack"
+CNETSTACK_DIR="$OMERTA_DIR/omerta_mesh/Sources/CNetstack"
+if [ -f "$NETSTACK_DIR/Makefile" ]; then
+    if [ ! -f "$CNETSTACK_DIR/libnetstack.a" ] || [ "$NETSTACK_DIR/tunnel_netstack.go" -nt "$CNETSTACK_DIR/libnetstack.a" ]; then
+        echo "Building netstack Go library..."
+        if ! command -v go &> /dev/null; then
+            echo "Error: Go is required to build netstack. Install Go first."
+            exit 1
+        fi
+        make -C "$NETSTACK_DIR" clean install
+        echo ""
+    fi
+fi
+
 # Determine build flags
 BUILD_FLAGS="-c release --product omertad --product omerta"
 if $USE_STATIC; then
@@ -98,8 +113,11 @@ if $USE_ARCH_HOME; then
     echo "Cleaning build cache..."
     ssh arch-home "docker run --rm -v ~/omerta-build:/build omerta-builder rm -rf /build/.build" 2>/dev/null || true
 
-    # Build each product separately (multi-product builds can have caching issues)
-    echo "Building on arch-home..."
+    # Build netstack first, then each Swift product separately
+    echo "Building netstack on arch-home..."
+    ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder make -C /build/omerta_mesh/Sources/OmertaTunnel/Netstack clean install"
+
+    echo "Building Swift products on arch-home..."
     ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omerta"
     ssh arch-home "cd ~/omerta-build && docker run --rm -v ~/omerta-build:/build omerta-builder swift build -c release --product omertad"
 
@@ -136,6 +154,8 @@ RUN dnf install -y \
     python3 \
     tar \
     gzip \
+    golang \
+    make \
     && dnf clean all
 
 # Install Swift 6.0.3
@@ -157,11 +177,11 @@ DOCKERFILE
         rm "$OMERTA_DIR/Dockerfile"
     fi
 
-    # Run build in container
+    # Run build in container (build netstack first, then Swift)
     docker run --rm \
         -v "$OMERTA_DIR:/build" \
         omerta-builder \
-        bash -c "swift build $BUILD_FLAGS"
+        bash -c "make -C /build/omerta_mesh/Sources/OmertaTunnel/Netstack clean install && swift build $BUILD_FLAGS"
 
     # Get bin path and copy binaries
     BIN_PATH="$OMERTA_DIR/.build/release"
