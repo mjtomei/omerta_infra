@@ -9,6 +9,11 @@
 terraform.tfvars
 *.tfvars
 !*.tfvars.example
+tfplan
+*.tfplan
+
+# Network configuration (contains encryption keys)
+network-link.txt
 
 # Secrets & Environment
 .env
