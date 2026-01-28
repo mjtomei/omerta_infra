@@ -378,3 +378,27 @@ Snapshots capture all EBS volumes on instances tagged with `Backup=true`. This p
 - Infrastructure redundancy (multi-region, failover)
 - Attestation data export to S3
 - Key material backup system
+
+## Development Status
+
+See [plans/notes.txt](../plans/notes.txt) for the latest human-managed TODO list.
+
+### Accomplished
+
+- [x] Terraform configurations for EC2 instances and Route53 DNS
+- [x] Build and deployment scripts for binaries
+- [x] Docker-based cross-platform build system
+- [x] Network key generation and seeding for mesh network
+- [x] Git hooks to protect against credential commits
+- [x] CloudWatch monitoring for disk space and process health
+- [x] Automated EBS snapshots via Data Lifecycle Manager
+- [x] Cost controls with relay disabled by default
+
+### TODO
+
+- [ ] Multi-region infrastructure redundancy and failover
+- [ ] Attestation data export to S3
+- [ ] Key material backup system
+- [ ] Standardize process for adding networks to bootstrap nodes
+- [ ] Lock down unnecessary omerta functionality on bootstrap nodes
+- [ ] Add config options to protect against DOS attacks on target mesh nodes
