@@ -52,3 +52,7 @@ Thumbs.db
 # AWS CLI download artifacts
 awscliv2.zip
 aws/
+
+# Parent repo stub files (ignored when working inside cloned repo)
+.commit
+REPO.md
